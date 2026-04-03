@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AI Assisted Wildfire System</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
+  <!-- CSS files -->
+  <link rel="stylesheet" href="css/main.css"/>
+  <link rel="stylesheet" href="css/map.css"/>
+  <link rel="stylesheet" href="css/sidebar.css"/>
+</head>
+<body>
+
+  <!-- LEFT PANEL -->
+  <div id="left-panel">
+
+    <div class="control-block">
+      <label>Date/Time</label>
+      <input type="date" id="date-input"/>
+      <input type="time" id="time-input"/>
+    </div>
+
+    <div class="control-block" id="playback-controls">
+      <button id="btn-start">⏮</button>
+      <button id="btn-pause">⏸</button>
+      <button id="btn-play">▶</button>
+      <button id="btn-ff">⏩</button>
+      <button id="btn-end">⏭</button>
+    </div>
+
+    <div class="control-block">
+      <label>Weather Controller</label>
+      <input type="range" id="weather-slider" min="0" max="48" value="12"/>
+      <div class="slider-labels">
+        <span>0</span><span>+12</span><span>+48</span>
+      </div>
+      <label>Forecast Model</label>
+      <select id="forecast-model">
+        <option value="era5">ERA5</option>
+        <option value="gfs">GFS</option>
+      </select>
+    </div>
+
+    <div class="control-block">
+      <label>Remote Sensing History</label>
+      <input type="range" id="history-slider" min="-30" max="0" value="0"/>
+      <div class="slider-labels">
+        <span>-30 days</span><span>-15 days</span><span>Today</span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- MAP CENTER -->
+  <div id="map-container">
+    <div id="map"></div>
+
+    <!-- Layer toggle panel -->
+    <div id="layer-panel">
+      <label><input type="checkbox" checked id="toggle-weather"/> Weather</label>
+      <div class="sub-layers">
+        <label><input type="checkbox" checked/> Wind</label>
+        <label><input type="checkbox" checked/> Temp</label>
+        <label><input type="checkbox" checked/> Humidity</label>
+        <label><input type="checkbox" checked/> Fuel type</label>
+      </div>
+      <label><input type="checkbox" checked id="toggle-remote"/> Remote Sensing</label>
+      <div class="sub-layers">
+        <label><input type="checkbox" checked/> Satellite</label>
+        <label><input type="checkbox" checked/> Fire hotspots</label>
+      </div>
+      <label><input type="checkbox" checked id="toggle-infra"/> Infrastructure</label>
+      <div class="sub-layers">
+        <label><input type="checkbox" checked/> Roads</label>
+        <label><input type="checkbox" checked/> Residence areas</label>
+      </div>
+      <button id="select-all">select all</button>
+    </div>
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div id="right-panel">
+    <div id="assistant-header">🔥 Wildfire Assistant</div>
+
+    <div id="quick-actions">
+      <button onclick="quickAsk('Analyze spreading patterns')">Analyze spreading patterns</button>
+      <button onclick="quickAsk('Suggest transportation routes')">Suggest transportation routes</button>
+      <button onclick="quickAsk('Develop evacuation plan')">Develop evacuation plan</button>
+    </div>
+
+    <div id="chat-messages"></div>
+
+    <div id="chat-input-row">
+      <input type="text" id="chat-input" placeholder="Ask about this fire..."/>
+      <button id="chat-send">↑</button>
+    </div>
+  </div>
+
+  <!-- BOTTOM BAR -->
+  <div id="bottom-bar">
+    <div class="stat-block">
+      <span class="stat-label">Estimated Burned Area (+2 hours):</span>
+      <span class="stat-value" id="burned-area">— Hectares</span>
+    </div>
+    <div class="stat-block">
+      <span class="stat-label">Estimated Time to Reach Resident Area:</span>
+      <span class="stat-value" id="time-to-reach">— minutes</span>
+    </div>
+  </div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!--  JS files -->
+  <script src="js/auth.js"></script>
+  <script src="js/map.js"></script>
+  <script src="js/wildfire.js"></script>
+  <script src="js/risk_zones.js"></script>
+  <script src="js/evacuation.js"></script>
+  <script src="js/controls.js"></script>
+  <script src="js/assistant.js"></script>
+
+</body>
+</html>

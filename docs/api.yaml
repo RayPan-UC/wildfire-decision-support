@@ -1,0 +1,29 @@
+# docs/api.yaml
+
+openapi: 3.0.0
+info:
+  title: Wildfire API
+  version: 1.0.0
+
+paths:
+
+  /hotspots:
+    get:
+      summary: get hotspots
+      responses:
+        200:
+          description: GeoJSON hotspots list
+
+  /risk-zones:
+    post:
+      summary: fire spread simulation with ML model
+      responses:
+        200:
+          description: polygon
+
+  /evacuation:
+    get:
+      summary: evacuation route
+      responses:
+        200:
+          description: route and evacuation points

@@ -1,0 +1,29 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;        
+  width: 100%;
+}
+
+body {
+  display: grid;
+  grid-template-columns: 220px 1fr 200px;
+  grid-template-rows: 1fr 70px;
+  grid-template-areas:
+    "left  map   right"
+    "stats stats stats";
+  height: 100vh;
+  background: #0f1117;
+  color: #ffffff;
+  font-family: Arial, sans-serif;
+  overflow: hidden;    
+}
+
+#left-panel    { grid-area: left; overflow-y: auto; }
+#map-container { grid-area: map; position: relative; }
+#right-panel   { grid-area: right; overflow-y: auto; }
+#bottom-bar    { grid-area: stats; }

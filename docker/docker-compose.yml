@@ -1,0 +1,41 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-wildfire_db}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      DB_HOST: db
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-wildfire_db}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-password}
+      SECRET_KEY: ${SECRET_KEY:-wildfire-secret-key-change-in-production}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ../data:/app/data
+
+volumes:
+  postgres_data:

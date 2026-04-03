@@ -1,0 +1,113 @@
+================================================================
+  Wildfire Spread AI — Docker Setup Guide (First-Time)
+================================================================
+
+PREREQUISITES
+  - Install Docker Desktop (Windows/Mac): https://www.docker.com/products/docker-desktop
+  - After installation, launch Docker Desktop and confirm the
+    Docker icon in the system tray shows "Running" (green)
+
+----------------------------------------------------------------
+  STEP 1: Configure Environment Variables
+----------------------------------------------------------------
+
+The .env file must be in the PROJECT ROOT (not inside docker/).
+Copy the example file to create your own .env:
+
+  # Run from the project root (wildfire-spread-ai/)
+  cp .env.example .env
+
+Open .env in any text editor and update as needed:
+
+  DB_NAME=wildfire_db
+  DB_USER=postgres
+  DB_PASSWORD=your_password        ← change this
+  SECRET_KEY=some_long_random_str  ← always change for production
+
+----------------------------------------------------------------
+  STEP 2: First-Time Startup (build images + init database)
+----------------------------------------------------------------
+
+docker-compose.yml is inside the docker/ folder.
+You must run all commands from the docker/ directory:
+
+  cd docker
+  docker compose up --build
+
+  --build is required the first time to build images.
+  Subsequent restarts do not need it unless you change
+  Dockerfile or requirements.txt.
+
+On first startup, Docker will:
+  1. Download postgis/postgis:16-3.4 and python:3.11-slim
+     (~500 MB, requires internet)
+  2. Run init.sql to create the users table automatically
+  3. Start 2 services: db / backend
+
+You should see this line when everything is ready:
+  backend-1   |  * Running on http://0.0.0.0:5000
+
+----------------------------------------------------------------
+  STEP 3: Accessing the Services
+----------------------------------------------------------------
+
+  Flask backend     → http://localhost:5000
+  PostgreSQL DB     → localhost:5432  (credentials from .env)
+
+API examples (curl or Postman):
+
+  # Register
+  curl -X POST http://localhost:5000/api/auth/register \
+       -H "Content-Type: application/json" \
+       -d '{"username":"test","password":"123456"}'
+
+  # Login
+  curl -X POST http://localhost:5000/api/auth/login \
+       -H "Content-Type: application/json" \
+       -d '{"username":"test","password":"123456"}'
+
+----------------------------------------------------------------
+  Common Commands  (all run from wildfire-spread-ai/docker/)
+----------------------------------------------------------------
+
+Run in background (detached mode):
+  docker compose up -d --build
+
+View logs:
+  docker compose logs -f
+  docker compose logs -f backend       # backend only
+
+Stop all services:
+  docker compose down
+
+Stop and delete all data (full reset):
+  docker compose down -v
+
+Rebuild a single service (e.g. after editing backend code):
+  docker compose up --build backend
+
+Open a database shell:
+  docker compose exec db psql -U postgres -d wildfire_db
+
+----------------------------------------------------------------
+  Troubleshooting
+----------------------------------------------------------------
+
+"docker compose: command not found"
+  → Older Docker versions use "docker-compose" (with hyphen).
+    Try: docker-compose up --build
+
+"Port 5432 already in use"
+  → A local PostgreSQL instance is running on the same port.
+    Stop it, or change the host port in docker-compose.yml:
+    ports: "5433:5432"  then restart.
+
+"backend: Connection refused (cannot reach db)"
+  → The DB may still be initializing. Wait a few seconds —
+    the backend will retry. Check: docker compose logs db
+
+"users table does not exist (init.sql not executed)"
+  → PostgreSQL skips init.sql when a volume already exists.
+    Run: docker compose down -v  then docker compose up --build
+
+================================================================

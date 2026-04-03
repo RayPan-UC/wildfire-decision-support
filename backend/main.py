@@ -12,10 +12,6 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = BASE_DIR.parent / "frontend"
 
-# Load .env variables FIRST before anything else
-from dotenv import load_dotenv
-load_dotenv(BASE_DIR.parent / ".env")
-
 app = Flask(
     __name__,
     template_folder=str(FRONTEND_DIR)

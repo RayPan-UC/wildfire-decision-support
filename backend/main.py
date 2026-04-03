@@ -1,12 +1,9 @@
 import config  # loads .env variables
 from flask import Flask, render_template
 from flask_cors import CORS
-from api.auth import auth_bp
-import sys
+from db.connection import db, get_db_uri
 import os
 from pathlib import Path
-
-
 
 # paths
 BASE_DIR = Path(__file__).resolve().parent
@@ -14,17 +11,31 @@ FRONTEND_DIR = BASE_DIR.parent / "frontend"
 
 app = Flask(
     __name__,
-    template_folder=str(FRONTEND_DIR)
+    template_folder=str(FRONTEND_DIR),
+    static_folder=str(FRONTEND_DIR),
+    static_url_path=''
 )
 CORS(app)
+
+app.config['SQLALCHEMY_DATABASE_URI'] = get_db_uri()
+db.init_app(app)
+
+from api.auth import auth_bp
 
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.htm")
+
+@app.route("/login")
+def login():
+    return render_template("login.htm")
 
 # Register blueprints
 app.register_blueprint(auth_bp)
+
+with app.app_context():
+    db.create_all()
 
 # from api.hotspots   import hotspots_bp
 # from api.risk_zones import risk_zones_bp
@@ -34,4 +45,4 @@ app.register_blueprint(auth_bp)
 # app.register_blueprint(chat_bp)
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    app.run(host='0.0.0.0', debug=True, port=5000)

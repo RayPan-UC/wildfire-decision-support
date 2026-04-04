@@ -405,3 +405,33 @@
   color: #ffffff;
   letter-spacing: -0.5px;
 }
+
+.horizon-btns {
+  display: flex;
+  gap: 8px; 
+}
+
+.horizon-btn {
+  background: #0f1117; 
+  border: 1px solid #334155;
+  border-radius: 6px; 
+  color: #94a3b8; 
+  padding: 6px 12px; 
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer; 
+  transition: all 0.2s ease; 
+  flex: 1; 
+}
+
+.horizon-btn:hover {
+  background: #1e2438; 
+  color: #ffffff; 
+}
+
+.horizon-btn.active {
+  background: rgba(74, 144, 226, 0.15); 
+  color: #4a90e2; 
+  border-color: #4a90e2; 
+}

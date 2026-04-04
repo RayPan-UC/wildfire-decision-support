@@ -119,6 +119,24 @@ function updateDashboardStats() {
     document.getElementById('time-to-reach').textContent = '1h 28m';
 }
 
+const horizonButtons = document.querySelectorAll('.horizon-btn');
+
+// Loop through every single button
+horizonButtons.forEach(button => {
+    
+    // Tell each button to listen for a mouse click
+    button.addEventListener('click', () => {
+        
+        // remove the active class from ALL buttons to clear them
+        horizonButtons.forEach(btn => btn.classList.remove('active'));
+        
+        // add the active class ONLY to the specific button
+        button.classList.add('active');
+        
+        console.log("Forecast Horizon changed to:", button.getAttribute('data-h') + " hours");
+    });
+});
+
 document.addEventListener('DOMContentLoaded', () => {
     // We use setTimeout to wait 800 milliseconds before filling the text.
     // This gives the map time to load first

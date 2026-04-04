@@ -67,7 +67,52 @@ async function loadHotspots() {
     }
 }
 
+async function loadPerimeter() {
+    try {
+        console.log("Asking Python server for fire perimeter...");
+        
+        const response = await fetch(`${API_BASE_URL}/perimeter/`);
+        const data = await response.json();
+        
+        // Save the polygon into a variable
+        const perimeterLayer = L.geoJSON(data, {
+            style: function (feature) {
+                return {
+                    color: "#8b4513", 
+                    weight: 3,        
+                    fillColor: "#8b4513", 
+                    fillOpacity: 0.2  
+                };
+            },
+            onEachFeature: function (feature, layer) {
+                layer.bindPopup(`<b>${feature.properties.name}</b>`);
+            }
+        });
+        
+        // Find the HTML checkbox for Fire Perimeter
+        const checkbox = document.getElementById('lyr-perimeter');
+        
+        // Put data on the map ONLY if the box is ticked
+        if (checkbox.checked) {
+            perimeterLayer.addTo(map);
+        }
+        
+        // Listen for changes. Add or remove the variable from the map.
+        checkbox.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                map.addLayer(perimeterLayer);
+            } else {
+                map.removeLayer(perimeterLayer);
+            }
+        });
+        
+    } catch (error) {
+        console.error("Could not load perimeter:", error);
+    }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     loadFireEvents();
     loadHotspots();
+    loadPerimeter(); 
 });

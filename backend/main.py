@@ -37,6 +37,9 @@ def create_app():
 
     from api.evacuation import evacuation_bp
     app.register_blueprint(evacuation_bp, url_prefix='/api/evacuation')
+
+    from api.perimeter import perimeter_bp
+    app.register_blueprint(perimeter_bp, url_prefix='/api/perimeter')
     
 
     @app.route("/")

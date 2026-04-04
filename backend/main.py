@@ -26,10 +26,10 @@ def create_app():
     from api.events import events_bp
     app.register_blueprint(events_bp, url_prefix='/api/events')
 
-    # from api.hotspots   import hotspots_bp
+    from api.hotspots   import hotspots_bp
+    app.register_blueprint(hotspots_bp, url_prefix='/api/hotspots')
     # from api.risk_zones import risk_zones_bp
     # from api.chat       import chat_bp
-    # app.register_blueprint(hotspots_bp, url_prefix='/api/hotspots')
     # app.register_blueprint(risk_zones_bp, url_prefix='/api/risk-zones')
     # app.register_blueprint(chat_bp, url_prefix='/api/chat')
 

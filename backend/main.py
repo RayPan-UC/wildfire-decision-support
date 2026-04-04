@@ -34,6 +34,9 @@ def create_app():
 
     from api.risk_zones import risk_zones_bp
     app.register_blueprint(risk_zones_bp, url_prefix='/api/risk-zones')
+
+    from api.evacuation import evacuation_bp
+    app.register_blueprint(evacuation_bp, url_prefix='/api/evacuation')
     
 
     @app.route("/")

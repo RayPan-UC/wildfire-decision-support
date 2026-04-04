@@ -33,31 +33,34 @@ async function loadFireEvents() {
     }
 }
 
-// Function to load the hotspots
 async function loadHotspots() {
     try {
         console.log("Asking Python server for hotspots...");
         
-        // Fetch the data from our new Python route
         const response = await fetch(`${API_BASE_URL}/hotspots/`);
         const data = await response.json();
         
-        // Add the GeoJSON data to the Leaflet map
-        L.geoJSON(data, {
+        const hotspotsLayer = L.geoJSON(data, {
             pointToLayer: function (feature, latlng) {
-                // Style the dots as glowing red circles
                 return L.circleMarker(latlng, {
-                    radius: 6,
-                    fillColor: "#ff0000",
-                    color: "#ffffff",
-                    weight: 1,
-                    opacity: 1,
-                    fillOpacity: 0.8
+                    radius: 6, fillColor: "#ff0000", color: "#ffffff",
+                    weight: 1, opacity: 1, fillOpacity: 0.8
                 });
             }
-        }).addTo(map);
+        });
         
-        console.log("Hotspots successfully drawn on the map.");
+        const checkbox = document.getElementById('lyr-hotspots');
+        if (checkbox.checked) {
+            hotspotsLayer.addTo(map);
+        }
+        
+        checkbox.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                map.addLayer(hotspotsLayer);
+            } else {
+                map.removeLayer(hotspotsLayer);
+            }
+        });
         
     } catch (error) {
         console.error("Could not load hotspots:", error);

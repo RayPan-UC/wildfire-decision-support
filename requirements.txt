@@ -8,3 +8,5 @@ python-dotenv==1.2.2
 rasterio
 numpy
 scikit-learn
+pydantic 
+geoalchemy2

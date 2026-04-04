@@ -11,8 +11,8 @@ class User(db.Model):
     password   = db.Column(db.String(255), nullable=False)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
 
-class FireEvent():
-    __tablename__ = "events"
+class FireEvent(db.Model):
+    __tablename__ = "fire_events"
     id          = db.Column(db.Integer, primary_key=True)
     name        = db.Column(db.Text, nullable=False)
     year        = db.Column(db.Integer)

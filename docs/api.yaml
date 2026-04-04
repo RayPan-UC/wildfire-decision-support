@@ -1,29 +1,149 @@
-# docs/api.yaml
-
 openapi: 3.0.0
 info:
-  title: Wildfire API
+  title: Wildfire Decision Support API
   version: 1.0.0
 
 paths:
 
-  /hotspots:
-    get:
-      summary: get hotspots
-      responses:
-        200:
-          description: GeoJSON hotspots list
+  # ── Auth ──────────────────────────────────────────────────────────
 
-  /risk-zones:
+  /api/auth/register:
     post:
-      summary: fire spread simulation with ML model
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                  minLength: 3
+                password:
+                  type: string
+                  minLength: 6
       responses:
-        200:
-          description: polygon
+        201:
+          description: Account created successfully
+        400:
+          description: Validation error
+        409:
+          description: Username already exists
 
-  /evacuation:
-    get:
-      summary: evacuation route
+  /api/auth/login:
+    post:
+      summary: Login and receive a JWT token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
       responses:
         200:
-          description: route and evacuation points
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                  username:
+                    type: string
+        401:
+          description: Invalid credentials
+
+  /api/auth/verify:
+    get:
+      summary: Verify a JWT token
+      security:
+        - bearerAuth: []
+      responses:
+        200:
+          description: Token is valid
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid:
+                    type: boolean
+                  username:
+                    type: string
+        401:
+          description: Token invalid or expired
+
+  # ── Events ────────────────────────────────────────────────────────
+
+  /api/events/:
+    get:
+      summary: List all fire events
+      responses:
+        200:
+          description: Array of fire events ordered by year descending
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                    name:
+                      type: string
+                    year:
+                      type: integer
+                    time_start:
+                      type: string
+                      format: date-time
+                    time_end:
+                      type: string
+                      format: date-time
+                    description:
+                      type: string
+                    bbox:
+                      type: array
+                      items:
+                        type: number
+                      description: "[minLon, minLat, maxLon, maxLat]"
+                      example: [-112.634, 56.157, -110.002, 57.380]
+
+  # ── WIP ───────────────────────────────────────────────────────────
+
+  /api/hotspots:
+    get:
+      summary: "[WIP] Get fire hotspots (NASA FIRMS)"
+      responses:
+        200:
+          description: GeoJSON hotspot features
+
+  /api/risk-zones:
+    post:
+      summary: "[WIP] Fire spread simulation (ML model)"
+      responses:
+        200:
+          description: Risk zone polygon
+
+  /api/chat:
+    post:
+      summary: "[WIP] AI wildfire assistant"
+      responses:
+        200:
+          description: Assistant response
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

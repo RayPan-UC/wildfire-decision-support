@@ -13,7 +13,7 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'wildfire-secret-key-change-in-production')
 
 
 #REGISTER
-@auth_bp.route('/api/auth/register', methods=['POST'])
+@auth_bp.route('/register', methods=['POST'])
 def register():
     data = request.get_json()
 
@@ -47,7 +47,7 @@ def register():
 
 
 #LOGIN
-@auth_bp.route('/api/auth/login', methods=['POST'])
+@auth_bp.route('/login', methods=['POST'])
 def login():
     data = request.get_json()
 
@@ -69,7 +69,7 @@ def login():
         token = jwt.encode({
             'user_id':  user.id,
             'username': user.username,
-            'exp':      datetime.utcnow() + timedelta(hours=24)
+            'exp':      datetime.utcnow() + timedelta(hours=1)
         }, SECRET_KEY, algorithm='HS256')
 
         return jsonify({
@@ -83,7 +83,7 @@ def login():
 
 
 # VERIFY TOKEN
-@auth_bp.route('/api/auth/verify', methods=['GET'])
+@auth_bp.route('/verify', methods=['GET'])
 def verify():
     auth_header = request.headers.get('Authorization', '')
 

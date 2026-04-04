@@ -69,6 +69,29 @@ document.getElementById('btn-end').onclick = () => updateTime(24);
 document.getElementById('btn-back').onclick = () => updateTime(parseInt(timeSlider.value) - 1);
 document.getElementById('btn-ff').onclick = () => updateTime(parseInt(timeSlider.value) + 1);
 
+// Find the button and all checkboxes
+const selectAllBtn = document.getElementById('select-all');
+const layerCheckboxes = document.querySelectorAll('#layer-panel input[type="checkbox"]');
+
+// Add the toggle logic
+selectAllBtn.addEventListener('click', () => {
+    // Check if every single checkbox is already checked
+    const areAllCurrentlyChecked = Array.from(layerCheckboxes).every(cb => cb.checked);
+
+    // If they are all checked, we want to turn them OFF (false).
+    // If even one is unchecked, we want to turn them all ON (true).
+    const newState = !areAllCurrentlyChecked;
+
+    layerCheckboxes.forEach(checkbox => {
+        checkbox.checked = newState;
+        // Tell the map to update the layers
+        checkbox.dispatchEvent(new Event('change'));
+    });
+
+    // Update the button text
+    selectAllBtn.textContent = newState ? 'Deselect All' : 'Select All';
+});
+
 // Create a function to update all the text on the dashboard
 function updateDashboardStats() {
     console.log("Updating dashboard statistics...");

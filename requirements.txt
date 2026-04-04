@@ -10,3 +10,5 @@ numpy
 scikit-learn
 pydantic 
 geoalchemy2
+cdsapi
+osmium

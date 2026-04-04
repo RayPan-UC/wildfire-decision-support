@@ -2,7 +2,7 @@ import config  # loads .env variables
 from flask import Flask, render_template
 from flask_cors import CORS
 from pathlib import Path
-from db.connection import db, get_db_uri
+from db.connection import db, get_db_uri, ensure_db, seed_db
 
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = BASE_DIR.parent / "frontend"
@@ -26,9 +26,12 @@ def create_app():
     from api.events import events_bp
     app.register_blueprint(events_bp, url_prefix='/api/events')
 
-    from api.hotspots   import hotspots_bp
+    from api.data import data_bp
+    app.register_blueprint(data_bp, url_prefix='/api/data')
+
+    from api.hotspots import hotspots_bp
     app.register_blueprint(hotspots_bp, url_prefix='/api/hotspots')
-    
+
     from api.chat import chat_bp
     app.register_blueprint(chat_bp, url_prefix='/api/chat')
 
@@ -40,7 +43,6 @@ def create_app():
 
     from api.perimeter import perimeter_bp
     app.register_blueprint(perimeter_bp, url_prefix='/api/perimeter')
-    
 
     @app.route("/")
     def index():
@@ -51,7 +53,12 @@ def create_app():
         return render_template("login.htm")
 
     with app.app_context():
+        ensure_db()
         db.create_all()
+        seed_db()
+
+        from api.data import start_pipeline_if_needed
+        start_pipeline_if_needed()
 
     return app
 

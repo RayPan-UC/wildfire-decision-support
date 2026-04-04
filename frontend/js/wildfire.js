@@ -16,12 +16,12 @@ async function loadFireEvents() {
             document.querySelector('.header-event').textContent = latestEvent.name;
             
             const bbox = latestEvent.bbox;
-            const mapCorners = [
-                [bbox[1], bbox[0]], 
-                [bbox[3], bbox[2]]  
-            ];
+            // Calculate the exact center of the bounding box
+            const centerLat = (bbox[1] + bbox[3]) / 2;
+            const centerLng = (bbox[0] + bbox[2]) / 2;
             
-            map.fitBounds(mapCorners);
+            // Set the map to look exactly at the center. 
+            map.setView([centerLat, centerLng], 10);
             console.log("4. Map zoom complete.");
         } else {
             // If the database is empty, it will print this warning.

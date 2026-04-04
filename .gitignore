@@ -3,8 +3,9 @@
 __pycache__/
 
 # Downloaded static datasets (regenerate via: python pipeline.py download --all)
-data/static/
+data/static/*
 !data/static/osm/
+data/static/osm/*
 !data/static/osm/roads_canada.gpkg
 
 # Generated event data (regenerate via: python pipeline.py clip <event_id> --all)

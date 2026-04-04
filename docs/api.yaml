@@ -118,52 +118,6 @@ paths:
                       description: "[minLon, minLat, maxLon, maxLat]"
                       example: [-112.634, 56.157, -110.002, 57.380]
 
-  # ── Data ──────────────────────────────────────────────────────────
-
-  /api/data/status:
-    get:
-      summary: Check static dataset readiness and pipeline status
-      description: >
-        Reports whether each static dataset is ready. If any dataset is missing,
-        the server starts a background download automatically on startup.
-        Poll this endpoint to track progress.
-      responses:
-        200:
-          description: Dataset status
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  ready:
-                    type: boolean
-                    description: True only if all datasets are ready
-                  pipeline_running:
-                    type: boolean
-                    description: True while background download is in progress
-                  current:
-                    type: string
-                    nullable: true
-                    description: Dataset currently being downloaded (e.g. "landcover")
-                  error:
-                    type: string
-                    nullable: true
-                    description: Error message if pipeline failed
-                  datasets:
-                    type: object
-                    properties:
-                      landcover:
-                        $ref: '#/components/schemas/DatasetStatus'
-                      community:
-                        $ref: '#/components/schemas/DatasetStatus'
-                      population:
-                        $ref: '#/components/schemas/DatasetStatus'
-                      osm:
-                        type: object
-                        properties:
-                          ready:
-                            type: boolean
-
   # ── WIP ───────────────────────────────────────────────────────────
 
   /api/hotspots:
@@ -194,19 +148,3 @@ components:
       scheme: bearer
       bearerFormat: JWT
 
-  schemas:
-    DatasetStatus:
-      type: object
-      properties:
-        ready:
-          type: boolean
-        years:
-          type: array
-          items:
-            type: integer
-          description: Years that are downloaded
-        missing:
-          type: array
-          items:
-            type: integer
-          description: Years that are missing

@@ -26,9 +26,6 @@ def create_app():
     from api.events import events_bp
     app.register_blueprint(events_bp, url_prefix='/api/events')
 
-    from api.data import data_bp
-    app.register_blueprint(data_bp, url_prefix='/api/data')
-
     from api.hotspots import hotspots_bp
     app.register_blueprint(hotspots_bp, url_prefix='/api/hotspots')
 
@@ -56,9 +53,6 @@ def create_app():
         ensure_db()
         db.create_all()
         seed_db()
-
-        from api.data import start_pipeline_if_needed
-        start_pipeline_if_needed()
 
     return app
 

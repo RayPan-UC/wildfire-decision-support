@@ -4,7 +4,7 @@
 
 | Task | Assignee | Status |
 |------|----------|--------|
-| Data Pipeline Status UI | | ⬜ Not started |
+| Data Pipeline Status UI | | ~~❌ Abandoned~~ |
 | Fire Event Hotspots on Home | | ⬜ Not started |
 
 > Status options: ⬜ Not started / 🔄 In progress / ✅ Done / 🚧 Blocked

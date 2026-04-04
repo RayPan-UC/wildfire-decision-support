@@ -11,19 +11,98 @@ html, body {
 
 body {
   display: grid;
-  grid-template-columns: 220px 1fr 200px;
-  grid-template-rows: 1fr 70px;
+  grid-template-columns: 280px 1fr 320px;
+  grid-template-rows: 60px 1fr 70px;
+  
   grid-template-areas:
-    "left  map   right"
-    "stats stats stats";
-  height: 100vh;
+    "header header header"
+    "left   map    right"
+    "bottom bottom bottom";
+    
   background: #0f1117;
   color: #ffffff;
-  font-family: Arial, sans-serif;
+  font-family: 'Inter', Arial, sans-serif;
   overflow: hidden;    
 }
-
-#left-panel    { grid-area: left; overflow-y: auto; }
+#top-header    { grid-area: header; }
+#left-panel    { grid-area: left; overflow-y: auto; z-index: 10; }
 #map-container { grid-area: map; position: relative; }
-#right-panel   { grid-area: right; overflow-y: auto; }
-#bottom-bar    { grid-area: stats; }
+#right-panel   { grid-area: right; overflow-y: auto; z-index: 10; }
+#bottom-bar    { grid-area: bottom; z-index: 10; }
+
+#top-header {
+  background: #13172a;
+  border-bottom: 1px solid #2a2d3e;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 20px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.header-logo {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 22px;
+  font-weight: 700;
+  color: #ff6b35; /* Orange */
+  text-decoration: none;
+}
+
+.header-logo em {
+  font-style: normal;
+  color: #ffffff;
+}
+
+.header-sep {
+  color: #555;
+}
+
+.header-event {
+  font-size: 14px;
+  color: #ccc;
+  font-weight: 500;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.rt-badge {
+  background: #1e2438;
+  border: 1px solid #2a3145;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  color: #888;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rt-dot {
+  width: 6px;
+  height: 6px;
+  background: #555;
+  border-radius: 50%;
+}
+
+.hdr-btn {
+  background: transparent;
+  border: 1px solid #3a4155;
+  color: #ccc;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.hdr-btn:hover {
+  background: #2a3145;
+}

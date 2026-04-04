@@ -1,3 +1,74 @@
+// Setup variables to track
+let isPlaying = false;
+let playbackInterval;
+
+// Get the HTML elements for the slider and time display
+const timeSlider = document.getElementById('time-slider');
+const timeDisplay = document.getElementById('time-display');
+const playBtn = document.getElementById('btn-play');
+const dateInput = document.getElementById('date-input');
+const mapDateStatus = document.getElementById('dyn-map-date');
+
+// Helper function to turn a number like 14 into "14:00"
+function formatTime(value) {
+    return value.toString().padStart(2, '0') + ":00";
+}
+
+// Function to update the time across the whole dashboard
+function updateTime(newValue) {
+    // Keep the number between 0 and 24
+    if (newValue < 0) newValue = 0;
+    if (newValue > 24) newValue = 24;
+    
+    // Update the slider position
+    timeSlider.value = newValue;
+    
+    // Update the large time text above the slider
+    timeDisplay.textContent = formatTime(newValue);
+    
+    // Update the small date/time in the bar under the map
+    if (mapDateStatus) {
+        mapDateStatus.textContent = `${dateInput.value} ${formatTime(newValue)} UTC`;
+    }
+
+    // In the future, this is where we will tell the map to show different fire data
+    console.log("Time changed to:", formatTime(newValue));
+}
+
+// Connect the slider to the update function 
+timeSlider.addEventListener('input', (e) => {
+    updateTime(e.target.value);
+});
+
+// Connect the Play/Pause button logic
+playBtn.addEventListener('click', () => {
+    if (isPlaying) {
+        // Stop the timer
+        isPlaying = false;
+        playBtn.textContent = '▶';
+        clearInterval(playbackInterval);
+    } else {
+        // Start a timer to move forward 1 hour every 1 second
+        isPlaying = true;
+        playBtn.textContent = '⏸';
+        
+        playbackInterval = setInterval(() => {
+            let nextHour = parseInt(timeSlider.value) + 1;
+            
+            // Loop back to the start of the day if we reach 24:00
+            if (nextHour > 24) nextHour = 0;
+            
+            updateTime(nextHour);
+        }, 1000);
+    }
+});
+
+// Connect the jump and step buttons
+document.getElementById('btn-start').onclick = () => updateTime(0);
+document.getElementById('btn-end').onclick = () => updateTime(24);
+document.getElementById('btn-back').onclick = () => updateTime(parseInt(timeSlider.value) - 1);
+document.getElementById('btn-ff').onclick = () => updateTime(parseInt(timeSlider.value) + 1);
+
 // Create a function to update all the text on the dashboard
 function updateDashboardStats() {
     console.log("Updating dashboard statistics...");

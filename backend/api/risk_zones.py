@@ -1,48 +1,33 @@
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
+from ml.inference import get_risk_zones
 
-# Create the blueprint
 risk_zones_bp = Blueprint('risk_zones', __name__)
 
+
 @risk_zones_bp.route('/', methods=['GET'])
-def get_risk_zones():
-    # In the future, ML models (Random Forest/XGBoost) will generate this data.
-    # For now, we test mock GeoJSON polygons near Fort McMurray.
-    
-    risk_geojson = {
-        "type": "FeatureCollection",
-        "features": [
-            {
-                "type": "Feature",
-                "geometry": {
-                    "type": "Polygon",
-                    "coordinates": [[
-                        [-111.45, 56.65], [-111.35, 56.65], 
-                        [-111.35, 56.70], [-111.45, 56.70], 
-                        [-111.45, 56.65]
-                    ]]
-                },
-                "properties": {
-                    "level": "High",
-                    "description": "+3h Spread Risk"
-                }
-            },
-            {
-                "type": "Feature",
-                "geometry": {
-                    "type": "Polygon",
-                    "coordinates": [[
-                        [-111.30, 56.72], [-111.20, 56.72], 
-                        [-111.20, 56.78], [-111.30, 56.78], 
-                        [-111.30, 56.72]
-                    ]]
-                },
-                "properties": {
-                    "level": "Medium",
-                    "description": "+6h Spread Risk"
-                }
-            }
-        ]
-    }
-    
-    # Send the GeoJSON to the frontend
-    return jsonify(risk_geojson), 200
+def risk_zones():
+    """Return ML-predicted wildfire spread risk zones as GeoJSON.
+
+    Query params:
+        t1        ISO timestamp, e.g. "2016-05-03T08:54:00"
+        delta_t_h Hours ahead to predict: 3.0 / 6.0 / 12.0  (default 6.0)
+
+    Response:
+        {
+          "t1":        "2016-05-03T08:54:00",
+          "t2":        "2016-05-03T14:54:00",
+          "delta_t_h": 6.0,
+          "cached":    false,
+          "geojson":   { GeoJSON FeatureCollection }
+        }
+    """
+    t1        = request.args.get("t1", "2016-05-03T08:54:00")
+    delta_t_h = float(request.args.get("delta_t_h", 6.0))
+
+    try:
+        result = get_risk_zones(t1=t1, delta_t_h=delta_t_h)
+        return jsonify(result), 200
+    except FileNotFoundError as e:
+        return jsonify({"error": str(e)}), 503
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500

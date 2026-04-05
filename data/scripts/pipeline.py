@@ -91,11 +91,6 @@ def clip_by_AOI(
         print("=== population ===")
         c_pop(event_id)
 
-    if perimeter:
-        from clipper.clip_perimeter import clip as c_perim
-        print("=== perimeter ===")
-        c_perim(event_id)
-
     if weather:
         from clipper.clip_weather import clip as c_weather
         print("=== weather ===")

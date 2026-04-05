@@ -40,7 +40,7 @@ def clip(event_id: int):
     print(f"[osm] reading {gpkg} ...")
 
     aoi   = box(*bbox_4326)
-    roads = gpd.read_file(gpkg, bbox=bbox_4326)
+    roads = gpd.read_file(gpkg, bbox=tuple(bbox_4326))
     roads = roads[roads.intersects(aoi)]
 
     print(f"[osm] {len(roads)} road features clipped")

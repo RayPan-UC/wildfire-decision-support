@@ -15,7 +15,13 @@ def event_dir(year: int, event_id: int) -> Path:
 
 def pick_firms_dataset(api_key: str, event_start, event_end) -> str:
     """Query FIRMS data_availability API and pick best dataset for event time range.
-    Prefers SP (Standard Product) over NRT (Near Real-Time) for historical data.
+
+    Priority order (SP preferred over NRT, VIIRS preferred over MODIS):
+      1. VIIRS_NOAA21_SP  — newest sensor, highest resolution (375m)
+      2. VIIRS_NOAA20_SP  — available from 2018
+      3. VIIRS_SNPP_SP    — available from 2012, covers most historical events
+      4. MODIS_SP         — fallback for pre-2012 events
+      5. NRT variants     — only if no SP covers the period
     """
     import pandas as pd
 
@@ -36,8 +42,22 @@ def pick_firms_dataset(api_key: str, event_start, event_end) -> str:
     if available.empty:
         raise ValueError(f"No FIRMS dataset covers {event_start} to {event_end}")
 
-    sp = available[available["data_id"].str.contains("_SP")]
-    return sp.iloc[0]["data_id"] if not sp.empty else available.iloc[0]["data_id"]
+    priority = [
+        "VIIRS_NOAA21_SP",
+        "VIIRS_NOAA20_SP",
+        "VIIRS_SNPP_SP",
+        "MODIS_SP",
+        "VIIRS_NOAA21_NRT",
+        "VIIRS_NOAA20_NRT",
+        "VIIRS_SNPP_NRT",
+        "MODIS_NRT",
+    ]
+    ids = set(available["data_id"])
+    for candidate in priority:
+        if candidate in ids:
+            return candidate
+
+    return available.iloc[0]["data_id"]
 
 
 def _get_flask_app():

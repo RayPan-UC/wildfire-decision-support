@@ -1,6 +1,14 @@
 // wildfire.js 
 const API_BASE_URL = 'http://localhost:5000/api';
 
+const flameIcon = L.divIcon({
+    html: '<span style="font-size:24px;line-height:1;">🔥</span>',
+    className: '',
+    iconSize: [28, 28],
+    iconAnchor: [14, 28],
+    popupAnchor: [0, -30]
+});
+
 async function loadFireEvents() {
     try {
         console.log("1. Asking Python server for events...");
@@ -23,6 +31,21 @@ async function loadFireEvents() {
             // Set the map to look exactly at the center. 
             map.setView([centerLat, centerLng], 10);
             console.log("4. Map zoom complete.");
+
+            // Place a marker for every event
+            events.forEach(event => {
+                const b = event.bbox;
+                const lat = (b[1] + b[3]) / 2;
+                const lng = (b[0] + b[2]) / 2;
+
+                L.marker([lat, lng], { icon: flameIcon })
+                    .addTo(map)
+                    .bindPopup(
+                        `<b>${event.name}</b><br/>` +
+                        `<em>Year: ${event.year}</em><br/><br/>` +
+                        `${event.description || ''}`
+                    );
+            });
         } else {
             // If the database is empty, it will print this warning.
             console.warn("WARNING: The database is empty. No events were found.");

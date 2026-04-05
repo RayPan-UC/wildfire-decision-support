@@ -49,7 +49,7 @@ async function handleLogin() {
             localStorage.setItem('wf_token', data.token);
             localStorage.setItem('wf_user', username);
             // Redirect to main dashboard
-            window.location.href = 'index.htm';
+            window.location.href = '/explore';
         } else {
             showError(data.message || 'Invalid username or password.');
         }
@@ -127,12 +127,12 @@ function authHeaders() {
 function logout() {
     localStorage.removeItem('wf_token');
     localStorage.removeItem('wf_user');
-    window.location.href = 'login.htm';
+    window.location.href = '/';
 }
 
 //   redirect to login if no token  
 function requireAuth() {
     if (!getToken()) {
-        window.location.href = 'login.htm';
+        window.location.href = '/login';
     }
 }

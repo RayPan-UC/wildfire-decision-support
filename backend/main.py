@@ -42,6 +42,10 @@ def create_app():
     app.register_blueprint(perimeter_bp, url_prefix='/api/perimeter')
 
     @app.route("/")
+    def home():
+        return render_template("home.htm")
+
+    @app.route("/explore")
     def index():
         return render_template("index.htm")
 

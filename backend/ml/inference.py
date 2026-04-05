@@ -45,13 +45,17 @@ def _get_study():
     return _study
 
 
+def _lib_models_dir() -> Path:
+    """Return the models/ directory shipped with the wildfire_hotspot_prediction package."""
+    import wildfire_hotspot_prediction
+    return Path(wildfire_hotspot_prediction.__file__).parent.parent / "models"
+
+
 def _get_predictor():
     global _predictor
     if _predictor is None:
         import wildfire_hotspot_prediction as whp
-        study    = _get_study()
-        models_dir = study.models_dir
-        _predictor = whp.WildfirePredictor(models_dir=models_dir, model_name="xgb")
+        _predictor = whp.WildfirePredictor(models_dir=_lib_models_dir(), model_name="xgb")
     return _predictor
 
 
@@ -59,8 +63,7 @@ def _get_predictor():
 
 def _load_threshold() -> float:
     """Return xgb decision threshold from model_full_thresholds.json."""
-    study = _get_study()
-    path  = study.models_dir / "model_full_thresholds.json"
+    path = _lib_models_dir() / "model_full_thresholds.json"
     if path.exists():
         return json.loads(path.read_text()).get("xgb", 0.5)
     return 0.5

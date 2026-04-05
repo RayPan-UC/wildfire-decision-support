@@ -6,6 +6,8 @@
 |------|----------|--------|
 | Data Pipeline Status UI | | ~~❌ Abandoned~~ |
 | Fire Event Hotspots on Home | | ✅ Done |
+| Risk Zone Layer (ML) | | ⬜ Not started |
+| Time Control Axis (T1 slider) | | ⬜ Not started |
 
 > Status options: ⬜ Not started / 🔄 In progress / ✅ Done / 🚧 Blocked
 
@@ -36,6 +38,30 @@ Response shape:
 - If `pipeline_running === true` → show loading overlay with current dataset name
 - If `error !== null` → show error banner
 - Poll every 5s while `pipeline_running === true`, stop when `ready === true`
+
+## Risk Zone Layer (ML)
+
+Fetch `GET /api/risk-zones/?t1=<t1>&delta_t_h=<delta_t>` and render risk polygons on the map.
+
+### Behaviour
+- Three polygon layers: `high` (red), `medium` (orange), `low` (yellow)
+- Polygons are merged 500m grid cells (not individual pixels)
+- Each feature has `risk`, `prob_mean`, `prob_max`, `cell_count` in properties
+- Triggered when user changes T1 or delta_t on the time control axis
+
+---
+
+## Time Control Axis (T1 slider)
+
+Let user select a T1 timestamp from the available overpass times and a delta_t offset.
+
+### Behaviour
+- Fetch available T1 timestamps from `GET /api/events/` or a dedicated `/api/overpasses/` endpoint
+- Slider steps through available overpass times (May 1–27 2016)
+- Three delta_t buttons: **+3h**, **+6h**, **+12h** (maps to delta_t_h = 3.0, 6.0, 12.0)
+- On change → call `/api/risk-zones/` with selected t1 + delta_t_h → update map
+
+---
 
 ## Fire Event Hotspots on Home
 

@@ -72,6 +72,7 @@ def seed_db():
             ),
             time_start  = '2016-05-01 00:00:00+00',
             time_end    = '2016-05-31 23:59:59+00',
+            end_date    = '2016-05-31',
             description = (
                 'The 2016 Horse River Wildfire (MWF-009) forced the evacuation of approximately '
                 '88,000 residents from Fort McMurray, Alberta. It burned approximately 590,000 '

@@ -218,11 +218,11 @@ def _build_timestep(event, ts, study, fire_state, predictor, threshold, pred_cac
     from db.models import EventTimestep
     ts = EventTimestep.query.get(ts.id)
 
-    if ts.prediction_status != "done":
+    if ts.prediction_status not in ("done", "failed"):
         _run_prediction_stage(event, ts, study, fire_state, predictor, threshold, pred_cache, pbar)
         ts = EventTimestep.query.get(ts.id)
 
-    if ts.spatial_analysis_status != "done":
+    if ts.prediction_status == "done" and ts.spatial_analysis_status not in ("done", "failed"):
         _run_spatial_stage(event, ts, pbar)
 
 

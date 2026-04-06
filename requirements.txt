@@ -15,3 +15,10 @@ geoalchemy2
 cdsapi
 osmium
 pyarrow
+anthropic
+google-generativeai
+xarray
+netCDF4
+dask
+osmnx
+git+https://github.com/RayPan-UC/wildfire-hotspot-prediction.git

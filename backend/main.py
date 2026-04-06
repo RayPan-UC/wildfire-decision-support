@@ -47,5 +47,8 @@ def create_app():
 if __name__ == '__main__':
     from pipeline import build_env
     app = create_app()
+    # Werkzeug debug mode runs two processes: reloader parent (WERKZEUG_RUN_MAIN unset)
+    # and server child (WERKZEUG_RUN_MAIN=true). Only run build_env once in the child.
+    # use_reloader=False avoids the double-run entirely.
     build_env(app)
-    app.run(host='0.0.0.0', debug=True, port=5000)
+    app.run(host='0.0.0.0', debug=True, use_reloader=False, port=5000)

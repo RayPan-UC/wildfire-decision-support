@@ -72,6 +72,24 @@ document.getElementById('btn-explore').addEventListener('click', () => {
     window.location.href = '/explore';
 });
 
+// Show map view (hide grid, reveal map, zoom to Fort McMurray)
+function showMapView() {
+    document.getElementById('home-grid').classList.add('hidden');
+    document.getElementById('home-map').classList.add('visible');
+    homeMap.invalidateSize();
+    homeMap.setView([56.726, -111.379], 9);
+}
+
+// Holds Fort McMurray event data once loaded
+let fortMcMurrayEvent = null;
+
+// Fort McMurray card click
+document.getElementById('card-fortmcmurray').addEventListener('click', () => {
+    showMapView();
+    const event = fortMcMurrayEvent || { id: 1, name: 'Fort McMurray Wildfire', year: 2016 };
+    openCard(event);
+});
+
 // Load events from API
 
 async function loadHomeEvents() {
@@ -87,6 +105,8 @@ async function loadHomeEvents() {
             L.marker([lat, lng], { icon: makeFireIcon(label) })
                 .addTo(homeMap)
                 .on('click', () => openCard(event));
+
+            if (event.id === 1) fortMcMurrayEvent = event;
         });
 
     } catch (err) {

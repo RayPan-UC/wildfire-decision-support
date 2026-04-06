@@ -83,11 +83,98 @@
 
     .btn-login-home:hover { border-color: #ff6b35; color: #ff6b35; }
 
+    /* Grid view */
+    #home-grid {
+      position: fixed;
+      top: 52px; left: 0; right: 0; bottom: 0;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      padding: 32px;
+      background: #0f1117;
+    }
+
+    #home-grid.hidden { display: none; }
+
+    .region-card {
+      border-radius: 14px;
+      border: 1px solid #1e2130;
+      background: #13172a;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 40px 32px;
+      text-align: center;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .region-card.clickable {
+      cursor: pointer;
+    }
+
+    .region-card.clickable:hover {
+      border-color: #ff6b35;
+      box-shadow: 0 0 32px rgba(255, 107, 53, 0.15);
+    }
+
+    .region-card.locked {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    .card-icon {
+      font-size: 48px;
+      line-height: 1;
+    }
+
+    .card-name {
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 28px;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: 0.5px;
+    }
+
+    .card-desc {
+      font-size: 13px;
+      color: #888;
+      line-height: 1.5;
+      max-width: 260px;
+    }
+
+    .card-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      border-radius: 20px;
+      padding: 5px 14px;
+    }
+
+    .badge-coming-soon {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid #2a2d3e;
+      color: #666;
+    }
+
+    .badge-available {
+      background: rgba(255, 107, 53, 0.12);
+      border: 1px solid #ff6b35;
+      color: #ff6b35;
+    }
+
     /* Map */
     #home-map {
       position: fixed;
       top: 52px; left: 0; right: 0; bottom: 0;
+      display: none;
     }
+
+    #home-map.visible { display: block; }
 
     /* Custom marker */
     .fire-marker-wrap {
@@ -231,6 +318,25 @@
       <button class="btn-login-home" onclick="window.location.href='/login'">Login</button>
     </div>
   </header>
+
+  <!-- Region selector grid -->
+  <div id="home-grid">
+    <!-- Realtime — locked / coming soon -->
+    <div class="region-card locked">
+      <div class="card-icon">📡</div>
+      <div class="card-name">Realtime</div>
+      <div class="card-desc">Live wildfire monitoring and active incident tracking.</div>
+      <span class="card-badge badge-coming-soon">🔒 Coming Soon</span>
+    </div>
+
+    <!-- Fort McMurray -->
+    <div class="region-card clickable" id="card-fortmcmurray">
+      <div class="card-icon">🔥</div>
+      <div class="card-name">Fort McMurray</div>
+      <div class="card-desc">Horse River Fire · May 2016 · Alberta, Canada<br/>589,552 ha burned · ~88,000 evacuees</div>
+      <span class="card-badge badge-available">Explore Event →</span>
+    </div>
+  </div>
 
   <div id="home-map"></div>
 

@@ -1,11 +1,288 @@
 openapi: 3.0.0
 info:
   title: Wildfire Decision Support API
-  version: 1.0.0
+  version: 2.0.0
+  description: >
+    REST API for the Wildfire Decision Support System.
+    All GeoJSON geometries are in EPSG:4326 (WGS84).
+
+servers:
+  - url: http://localhost:5000
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+
+    # ── Shared ────────────────────────────────────────────────────────────────
+
+    GeoJsonFeatureCollection:
+      type: object
+      properties:
+        type:
+          type: string
+          example: FeatureCollection
+        features:
+          type: array
+          items:
+            type: object
+
+    # ── Events ────────────────────────────────────────────────────────────────
+
+    FireEvent:
+      type: object
+      properties:
+        id:          { type: integer, example: 1 }
+        name:        { type: string,  example: "Fort McMurray Wildfire 2016" }
+        year:        { type: integer, example: 2016 }
+        time_start:  { type: string,  format: date-time, example: "2016-05-01T00:00:00" }
+        time_end:    { type: string,  format: date-time, example: "2016-06-04T00:00:00" }
+        description: { type: string,  example: "Largest wildfire evacuation in Alberta history" }
+        bbox:
+          type: array
+          items: { type: number }
+          description: "[minLon, minLat, maxLon, maxLat]"
+          example: [-112.634, 56.157, -110.002, 57.380]
+
+    # ── Timesteps ─────────────────────────────────────────────────────────────
+
+    EventTimestep:
+      type: object
+      properties:
+        id:                      { type: integer, example: 42 }
+        slot_time:               { type: string, format: date-time, example: "2016-05-04T06:00:00" }
+        nearest_t1:              { type: string, format: date-time, example: "2016-05-04T05:12:00" }
+        gap_hours:               { type: number, example: 0.8 }
+        data_gap_warn:           { type: boolean, example: false }
+        prediction_status:       { type: string, enum: [pending, running, done, failed], example: done }
+        spatial_analysis_status: { type: string, enum: [pending, running, done, failed], example: done }
+
+    # ── GeoJSON: Perimeter ────────────────────────────────────────────────────
+
+    PerimeterFeature:
+      type: object
+      description: Fire perimeter polygon at T1
+      properties:
+        type:     { type: string, example: Feature }
+        geometry:
+          type: object
+          description: Polygon or MultiPolygon (EPSG:4326)
+          properties:
+            type:        { type: string, example: Polygon }
+            coordinates: { type: array }
+        properties:
+          type: object
+          properties:
+            t1:          { type: string, format: date-time }
+            area_km2:    { type: number, example: 12.45 }
+            perimeter_m: { type: number, example: 24318.7 }
+
+    # ── GeoJSON: Hotspots ─────────────────────────────────────────────────────
+
+    HotspotFeature:
+      type: object
+      description: Satellite hotspot point at T1
+      properties:
+        type:     { type: string, example: Feature }
+        geometry:
+          type: object
+          properties:
+            type:        { type: string, example: Point }
+            coordinates:
+              type: array
+              items: { type: number }
+              example: [-111.38, 56.74]
+        properties:
+          type: object
+          properties:
+            frp:        { type: number, description: "Fire Radiative Power (MW)", example: 45.2 }
+            confidence: { type: string, description: "FIRMS confidence level", example: "high" }
+
+    # ── GeoJSON: Risk Zones ───────────────────────────────────────────────────
+
+    RiskZoneFeature:
+      type: object
+      description: Predicted wildfire spread risk zone polygon
+      properties:
+        type:     { type: string, example: Feature }
+        geometry:
+          type: object
+          description: MultiPolygon (EPSG:4326) — merged 500 m cells
+          properties:
+            type:        { type: string, example: MultiPolygon }
+            coordinates: { type: array }
+        properties:
+          type: object
+          properties:
+            horizon:
+              type: string
+              enum: [3h, 6h, 12h]
+              description: Prediction horizon
+            risk_level:
+              type: string
+              enum: [high, medium, low]
+              description: >
+                high   = prob ≥ Youden threshold (RF),
+                medium = 0.5× threshold,
+                low    = 0.25× threshold
+            cell_count: { type: integer, example: 84 }
+            prob_mean:  { type: number,  example: 0.066 }
+            prob_max:   { type: number,  example: 0.183 }
+
+    # ── GeoJSON: Roads ────────────────────────────────────────────────────────
+
+    RoadFeature:
+      type: object
+      description: Major road segment with fire-impact status
+      properties:
+        type:     { type: string, example: Feature }
+        geometry:
+          type: object
+          properties:
+            type:        { type: string, example: LineString }
+            coordinates: { type: array }
+        properties:
+          type: object
+          properties:
+            road_name: { type: string, example: "881 Highway" }
+            highway:   { type: string, example: secondary, description: OSM highway tag }
+            status:
+              type: string
+              enum: [burned, at_risk_3h, at_risk_6h, at_risk_12h, clear]
+              description: Worst-case overlap with perimeter / risk zones
+            cut_at:
+              type: string
+              enum: [burned, at_risk_3h, at_risk_6h, at_risk_12h]
+              nullable: true
+              description: >
+                Risk zone where the road is first intersected (most severe zone).
+                null if road status is clear.
+            cut_location:
+              type: array
+              nullable: true
+              description: >
+                Array of human-readable cut-point descriptions (nearest landmark +
+                bearing + distance). Collects ALL cut points across all risk-zone
+                boundaries — typically 2+ entries when a road crosses multiple zones.
+                null if road status is clear.
+              items:
+                type: string
+                example: "NE of Fort McMurray, 12 km"
+
+    # ── Fire Context ──────────────────────────────────────────────────────────
+
+    FireContext:
+      type: object
+      description: >
+        Fire situation summary for a single T1 overpass.
+        Generated by the prediction pipeline and extended by the spatial stage (road_summary).
+      properties:
+        t1:
+          type: string
+          format: date-time
+          example: "2016-05-04T08:54:00"
+        t0:
+          type: string
+          format: date-time
+          nullable: true
+          example: "2016-05-04T06:12:00"
+        actual_delta_h:
+          type: number
+          nullable: true
+          description: Hours between T0 and T1
+          example: 2.7
+        fire:
+          type: object
+          properties:
+            burned_area_km2:  { type: number, example: 87.34 }
+            new_area_km2:     { type: number, example: 12.45 }
+            growth_rate_km2h: { type: number, example: 4.61 }
+            perimeter_m:      { type: number, example: 68241.5 }
+            n_hotspots:       { type: integer, example: 47 }
+            frp_sum:          { type: number, example: 1823.6 }
+        weather_t1:
+          type: object
+          properties:
+            wind_speed_kmh: { type: number, example: 32.4 }
+            wind_dir:       { type: number, description: "Degrees clockwise from north", example: 245.1 }
+            temp_c:         { type: number, example: 28.7 }
+            rh:             { type: number, description: "Relative humidity (%)", example: 15.2 }
+        fwi_t1:
+          type: object
+          description: Canadian Forest Fire Weather Index components
+          properties:
+            ffmc:        { type: number, description: "Fine Fuel Moisture Code", example: 94.2 }
+            isi:         { type: number, description: "Initial Spread Index", example: 18.7 }
+            ros_mean_mh: { type: number, description: "Mean Rate of Spread (m/h)", example: 425.0 }
+            ros_max_mh:  { type: number, description: "Max Rate of Spread (m/h)", example: 1240.0 }
+        wind_forecast:
+          type: array
+          description: Hourly wind forecast at fire centroid, T1 → T1+12h
+          items:
+            type: object
+            properties:
+              hour:      { type: integer, example: 3 }
+              speed_kmh: { type: number,  example: 28.1 }
+              dir:       { type: number,  example: 251.3 }
+        road_summary:
+          type: array
+          nullable: true
+          description: >
+            Added by spatial stage. Summary of affected major roads, sorted by severity.
+            Feeds directly into evacuation_agent and chat_agent.
+          items:
+            type: object
+            properties:
+              road:         { type: string, example: "881 Highway" }
+              highway:      { type: string, example: secondary }
+              worst_status: { type: string, enum: [burned, at_risk_3h, at_risk_6h, at_risk_12h] }
+              cut_at:
+                type: string
+                enum: [burned, at_risk_3h, at_risk_6h, at_risk_12h]
+                nullable: true
+              cut_location:
+                type: array
+                nullable: true
+                description: All cut-point descriptions for this road
+                items:
+                  type: string
+                  example: "NE of Fort McMurray, 12 km"
+
+    # ── Analysis (DB counts) ──────────────────────────────────────────────────
+
+    AnalysisResult:
+      type: object
+      properties:
+        affected_population: { type: integer, nullable: true, example: 45200 }
+        at_risk_3h:          { type: integer, nullable: true, example: 12400 }
+        at_risk_6h:          { type: integer, nullable: true, example: 18700 }
+        at_risk_12h:         { type: integer, nullable: true, example: 27100 }
+
+    # ── AI Report ─────────────────────────────────────────────────────────────
+
+    AiReport:
+      type: object
+      properties:
+        risk_analysis:
+          type: string
+          description: Wildfire behavior and spread risk assessment
+        impact_analysis:
+          type: string
+          description: Community and infrastructure impact assessment
+        evacuation_analysis:
+          type: string
+          description: Evacuation priority and route assessment
+        situation_overview:
+          type: string
+          description: Executive briefing summarizing the three analyses
 
 paths:
 
-  # ── Auth ──────────────────────────────────────────────────────────
+  # ── Auth ──────────────────────────────────────────────────────────────────
 
   /api/auth/register:
     post:
@@ -18,23 +295,16 @@ paths:
               type: object
               required: [username, password]
               properties:
-                username:
-                  type: string
-                  minLength: 3
-                password:
-                  type: string
-                  minLength: 6
+                username: { type: string, minLength: 3 }
+                password: { type: string, minLength: 6 }
       responses:
-        201:
-          description: Account created successfully
-        400:
-          description: Validation error
-        409:
-          description: Username already exists
+        201: { description: Account created }
+        400: { description: Validation error }
+        409: { description: Username already exists }
 
   /api/auth/login:
     post:
-      summary: Login and receive a JWT token
+      summary: Login and receive JWT
       requestBody:
         required: true
         content:
@@ -43,10 +313,8 @@ paths:
               type: object
               required: [username, password]
               properties:
-                username:
-                  type: string
-                password:
-                  type: string
+                username: { type: string }
+                password: { type: string }
       responses:
         200:
           description: Login successful
@@ -55,172 +323,250 @@ paths:
               schema:
                 type: object
                 properties:
-                  token:
-                    type: string
-                  username:
-                    type: string
-        401:
-          description: Invalid credentials
+                  token:    { type: string }
+                  username: { type: string }
+        401: { description: Invalid credentials }
 
   /api/auth/verify:
     get:
-      summary: Verify a JWT token
-      security:
-        - bearerAuth: []
+      summary: Verify JWT token
+      security: [{ bearerAuth: [] }]
       responses:
         200:
-          description: Token is valid
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  valid:
-                    type: boolean
-                  username:
-                    type: string
-        401:
-          description: Token invalid or expired
+                  valid:    { type: boolean }
+                  username: { type: string }
+        401: { description: Token invalid or expired }
 
-  # ── Events ────────────────────────────────────────────────────────
+  # ── Events ────────────────────────────────────────────────────────────────
 
   /api/events/:
     get:
       summary: List all fire events
       responses:
         200:
-          description: Array of fire events ordered by year descending
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  type: object
-                  properties:
-                    id:
-                      type: integer
-                    name:
-                      type: string
-                    year:
-                      type: integer
-                    time_start:
-                      type: string
-                      format: date-time
-                    time_end:
-                      type: string
-                      format: date-time
-                    description:
-                      type: string
-                    bbox:
-                      type: array
-                      items:
-                        type: number
-                      description: "[minLon, minLat, maxLon, maxLat]"
-                      example: [-112.634, 56.157, -110.002, 57.380]
+                  $ref: '#/components/schemas/FireEvent'
 
-  # ── WIP ───────────────────────────────────────────────────────────
-
-  /api/hotspots:
+  /api/events/{event_id}:
     get:
-      summary: "[WIP] Get fire hotspots (NASA FIRMS)"
-      responses:
-        200:
-          description: GeoJSON hotspot features
-
-  /api/risk-zones/:
-    get:
-      summary: ML-predicted wildfire spread risk zones
+      summary: Get fire event by ID
       parameters:
-        - in: query
-          name: t1
-          required: false
-          schema:
-            type: string
-            format: date-time
-            example: "2016-05-03T08:54:00"
-          description: >
-            T1 timestamp (ISO 8601). Snapped to nearest observed overpass.
-            Defaults to 2016-05-03T08:54:00 if omitted.
-        - in: query
-          name: delta_t_h
-          required: false
-          schema:
-            type: number
-            example: 6.0
-          description: >
-            Hours ahead to predict (e.g. 3.0, 6.0, 12.0).
-            Defaults to 6.0 if omitted.
+        - { name: event_id, in: path, required: true, schema: { type: integer } }
       responses:
         200:
-          description: Risk zone GeoJSON with metadata
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FireEvent' }
+        404: { description: Event not found }
+
+  # ── Timesteps ─────────────────────────────────────────────────────────────
+
+  /api/events/{event_id}/timesteps:
+    get:
+      summary: List all 3h timestep slots for an event
+      description: >
+        Returns the canonical 3-hour slot grid from event start to end.
+        Each slot has nearest_t1 (most recent satellite overpass ≤ slot_time)
+        and pipeline stage statuses.
+      parameters:
+        - { name: event_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        200:
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EventTimestep'
+        404: { description: Event not found }
+
+  /api/events/{event_id}/timesteps/{ts_id}/perimeter:
+    get:
+      summary: Fire perimeter GeoJSON at this timestep
+      parameters:
+        - { name: event_id, in: path, required: true, schema: { type: integer } }
+        - { name: ts_id,    in: path, required: true, schema: { type: integer } }
+      responses:
+        200:
+          description: FeatureCollection with 0 or 1 polygon feature
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  t1:
-                    type: string
-                    format: date-time
-                    description: Actual T1 used (snapped to nearest overpass)
-                  t2:
-                    type: string
-                    format: date-time
-                    description: Predicted T2 = T1 + delta_t_h
-                  delta_t_h:
-                    type: number
-                  cached:
-                    type: boolean
-                    description: True if result was served from disk cache
-                  geojson:
-                    type: object
-                    description: GeoJSON FeatureCollection
-                    properties:
-                      type:
-                        type: string
-                        example: FeatureCollection
-                      features:
-                        type: array
-                        items:
-                          type: object
-                          properties:
-                            type:
-                              type: string
-                              example: Feature
-                            geometry:
-                              type: object
-                              description: Merged polygon (EPSG:4326)
-                            properties:
-                              type: object
-                              properties:
-                                risk:
-                                  type: string
-                                  enum: [high, medium, low]
-                                  description: >
-                                    high   = prob ≥ 0.36 (xgb threshold),
-                                    medium = prob ≥ 0.15,
-                                    low    = prob ≥ 0.05
-                                cell_count:
-                                  type: integer
-                                prob_mean:
-                                  type: number
-                                prob_max:
-                                  type: number
-        503:
-          description: Study data or model not available (STUDY_DIR misconfigured)
-        500:
-          description: Internal inference error
+                  type: { type: string, example: FeatureCollection }
+                  features:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PerimeterFeature'
+        404: { description: Event or timestep not found }
 
-  /api/chat:
-    post:
-      summary: "[WIP] AI wildfire assistant"
+  /api/events/{event_id}/timesteps/{ts_id}/hotspots:
+    get:
+      summary: Satellite hotspot points at this timestep (T1 overpass)
+      parameters:
+        - { name: event_id, in: path, required: true, schema: { type: integer } }
+        - { name: ts_id,    in: path, required: true, schema: { type: integer } }
       responses:
         200:
-          description: Assistant response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  type: { type: string, example: FeatureCollection }
+                  features:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/HotspotFeature'
+        404: { description: Event or timestep not found }
 
-components:
-  securitySchemes:
-    bearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
+  /api/events/{event_id}/timesteps/{ts_id}/risk-zones:
+    get:
+      summary: ML-predicted risk zones for 3h / 6h / 12h horizons (combined)
+      description: >
+        Returns all three horizons merged into one FeatureCollection.
+        Use the `horizon` property on each feature to filter by horizon.
+      parameters:
+        - { name: event_id, in: path, required: true, schema: { type: integer } }
+        - { name: ts_id,    in: path, required: true, schema: { type: integer } }
+      responses:
+        200:
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  type: { type: string, example: FeatureCollection }
+                  features:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RiskZoneFeature'
+        404: { description: Event or timestep not found }
 
+  /api/events/{event_id}/timesteps/{ts_id}/roads:
+    get:
+      summary: Major road segments with fire-impact status
+      description: >
+        Each road segment is classified by its worst-case overlap with the
+        fire perimeter or risk zones.
+        Status values: burned > at_risk_3h > at_risk_6h > at_risk_12h > clear.
+      parameters:
+        - { name: event_id, in: path, required: true, schema: { type: integer } }
+        - { name: ts_id,    in: path, required: true, schema: { type: integer } }
+      responses:
+        200:
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  type: { type: string, example: FeatureCollection }
+                  features:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RoadFeature'
+        404: { description: Event or timestep not found }
+
+  /api/events/{event_id}/timesteps/{ts_id}/analysis:
+    get:
+      summary: Population-at-risk counts (from DB)
+      description: >
+        Pre-computed population counts from the spatial analysis stage.
+        affected_population = within current fire perimeter.
+        at_risk_Xh = within Xh risk zone.
+      parameters:
+        - { name: event_id, in: path, required: true, schema: { type: integer } }
+        - { name: ts_id,    in: path, required: true, schema: { type: integer } }
+      responses:
+        200:
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnalysisResult' }
+        404: { description: Event or timestep not found }
+
+  /api/events/{event_id}/timesteps/{ts_id}/fire-context:
+    get:
+      summary: Fire situation context (metrics, weather, FWI, wind forecast, road summary)
+      description: >
+        Raw fire_context.json generated by the prediction pipeline.
+        road_summary is appended by the spatial stage.
+      parameters:
+        - { name: event_id, in: path, required: true, schema: { type: integer } }
+        - { name: ts_id,    in: path, required: true, schema: { type: integer } }
+      responses:
+        200:
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FireContext' }
+        404: { description: Fire context not yet available }
+
+  /api/events/{event_id}/timesteps/{ts_id}/report:
+    post:
+      summary: Generate (or return cached) AI situation report
+      description: >
+        Runs four AI agents in sequence: risk → impact → evacuation → summary.
+        Result is cached to ai_summary.json and returned on subsequent calls.
+        Requires fire_context.json to exist (prediction stage must be done).
+      parameters:
+        - { name: event_id, in: path, required: true, schema: { type: integer } }
+        - { name: ts_id,    in: path, required: true, schema: { type: integer } }
+      responses:
+        200:
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AiReport' }
+        404: { description: Event or timestep not found }
+        422: { description: Fire context not available — prediction stage not done }
+
+  /api/events/{event_id}/chat:
+    post:
+      summary: Stateless streaming chat with wildfire assistant
+      description: >
+        Streams plain text response. If timestep_id is provided, the agent is seeded
+        with situation_overview (from ai_summary.json) and road_summary (from
+        fire_context.json) as context.
+        Each response ends with a section suggesting 3 follow-up questions.
+      parameters:
+        - { name: event_id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message:
+                  type: string
+                  example: "What areas should be evacuated first?"
+                timestep_id:
+                  type: integer
+                  nullable: true
+                  description: Optional — seeds context with situation_overview + road_summary
+                history:
+                  type: array
+                  description: Previous turns for multi-turn conversation
+                  items:
+                    type: object
+                    properties:
+                      role:    { type: string, enum: [user, assistant] }
+                      content: { type: string }
+      responses:
+        200:
+          description: >
+            Streamed plain-text response (text/plain). Response body ends with a
+            "Suggested questions:" section listing 3 follow-up questions.
+          content:
+            text/plain:
+              schema: { type: string }
+        400: { description: message required }

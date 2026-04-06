@@ -2,73 +2,319 @@
 
 ## Task Status
 
-| Task | Assignee | Status |
-|------|----------|--------|
-| Data Pipeline Status UI | | ~~❌ Abandoned~~ |
-| Fire Event Hotspots on Home | | ✅ Done |
-| Risk Zone Layer (ML) | | ⬜ Not started |
-| Time Control Axis (T1 slider) | | ⬜ Not started |
+| Task | Status |
+|------|--------|
+| Fire Event Hotspots on Home | ✅ Done |
+| Data Pipeline Status UI | ~~❌ Abandoned~~ |
+| Replay Scrubber (3h slot timeline) | ⬜ Not started |
+| Fire Perimeter Layer | ⬜ Not started |
+| Hotspots Layer | ⬜ Not started |
+| Risk Zone Layer (3h / 6h / 12h) | ⬜ Not started |
+| Roads Layer (status + cut locations) | ⬜ Not started |
+| Analysis Panel (population counts) | ⬜ Not started |
+| Fire Context Panel (weather / FWI / wind) | ⬜ Not started |
+| AI Situation Report | ⬜ Not started |
+| Chat Assistant | ⬜ Not started |
 
 > Status options: ⬜ Not started / 🔄 In progress / ✅ Done / 🚧 Blocked
 
 ---
 
-## Data Pipeline Status UI
+## API Base
 
-Poll `GET /api/data/status` on app load and show download progress to the user.
+All endpoints are under `http://localhost:5000/api`. Full schema: `docs/api.yaml`.
 
-Response shape:
+---
+
+## Fire Event Hotspots on Home ✅
+
+On page load, fetch `GET /api/events/` and display each event as a marker on the map.
+
+**Response:**
+```json
+[
+  {
+    "id": 1,
+    "name": "Fort McMurray Wildfire 2016",
+    "year": 2016,
+    "time_start": "2016-05-01T00:00:00",
+    "time_end":   "2016-06-04T00:00:00",
+    "description": "...",
+    "bbox": [-112.634, 56.157, -110.002, 57.380]
+  }
+]
+```
+
+---
+
+## Replay Scrubber (3h slot timeline)
+
+Fetch all timestep slots for an event. Let user scrub through time.
+
+**Endpoint:** `GET /api/events/{event_id}/timesteps`
+
+**Response (array):**
+```json
+[
+  {
+    "id": 1,
+    "slot_time":               "2016-05-01T12:00:00",
+    "nearest_t1":              "2016-05-01T11:12:00",
+    "gap_hours":               0.8,
+    "data_gap_warn":           false,
+    "prediction_status":       "done",
+    "spatial_analysis_status": "done"
+  }
+]
+```
+
+**Behaviour:**
+- Slider steps through `slot_time` values chronologically
+- Show `nearest_t1` and `gap_hours` as metadata
+- Grey out or warn slots where `data_gap_warn: true`
+- On slot change → update all layers (perimeter, hotspots, risk zones, roads, analysis)
+
+---
+
+## Fire Perimeter Layer
+
+**Endpoint:** `GET /api/events/{event_id}/timesteps/{ts_id}/perimeter`
+
+**Response:** GeoJSON `FeatureCollection` — 0 or 1 Polygon/MultiPolygon feature.
+
 ```json
 {
-  "ready": false,
-  "pipeline_running": true,
-  "current": "osm",
-  "error": null,
-  "datasets": {
-    "landcover":  { "ready": true,  "years": [2014, 2024], "missing": [] },
-    "community":  { "ready": true,  "years": [2011, 2016, 2021], "missing": [] },
-    "population": { "ready": true,  "years": [2011, 2016, 2021], "missing": [] },
-    "osm":        { "ready": false }
-  }
+  "type": "FeatureCollection",
+  "features": [{
+    "type": "Feature",
+    "geometry": { "type": "Polygon", "coordinates": [...] },
+    "properties": {
+      "t1":          "2016-05-04T08:54:00",
+      "area_km2":    87.34,
+      "perimeter_m": 68241.5
+    }
+  }]
 }
 ```
 
-### Behaviour
-- If `ready === true` → show app normally
-- If `pipeline_running === true` → show loading overlay with current dataset name
-- If `error !== null` → show error banner
-- Poll every 5s while `pipeline_running === true`, stop when `ready === true`
-
-## Risk Zone Layer (ML)
-
-Fetch `GET /api/risk-zones/?t1=<t1>&delta_t_h=<delta_t>` and render risk polygons on the map.
-
-### Behaviour
-- Three polygon layers: `high` (red), `medium` (orange), `low` (yellow)
-- Polygons are merged 500m grid cells (not individual pixels)
-- Each feature has `risk`, `prob_mean`, `prob_max`, `cell_count` in properties
-- Triggered when user changes T1 or delta_t on the time control axis
+**Behaviour:**
+- Render as filled polygon (red/orange, semi-transparent)
+- Show area_km2 and perimeter_m in a tooltip or sidebar
 
 ---
 
-## Time Control Axis (T1 slider)
+## Hotspots Layer
 
-Let user select a T1 timestamp from the available overpass times and a delta_t offset.
+**Endpoint:** `GET /api/events/{event_id}/timesteps/{ts_id}/hotspots`
 
-### Behaviour
-- Fetch available T1 timestamps from `GET /api/events/` or a dedicated `/api/overpasses/` endpoint
-- Slider steps through available overpass times (May 1–27 2016)
-- Three delta_t buttons: **+3h**, **+6h**, **+12h** (maps to delta_t_h = 3.0, 6.0, 12.0)
-- On change → call `/api/risk-zones/` with selected t1 + delta_t_h → update map
+**Response:** GeoJSON `FeatureCollection` — Point features.
+
+```json
+{
+  "type": "FeatureCollection",
+  "features": [{
+    "type": "Feature",
+    "geometry": { "type": "Point", "coordinates": [-111.38, 56.74] },
+    "properties": {
+      "frp":        45.2,
+      "confidence": "high"
+    }
+  }]
+}
+```
+
+**Behaviour:**
+- Render as circle markers, size/colour scaled by `frp`
+- Tooltip: FRP value + confidence
 
 ---
 
-## Fire Event Hotspots on Home
+## Risk Zone Layer (3h / 6h / 12h)
 
-On page load, fetch `GET /api/events/` and display each fire event as a hotspot marker on the map.
+**Endpoint:** `GET /api/events/{event_id}/timesteps/{ts_id}/risk-zones`
 
-### Behaviour
-- Call `GET /api/events/` on home load
-- For each event, place a marker at the center of its `bbox`
-- Clicking a marker shows event name, year, and description in a popup
-- Marker style should visually distinguish fire events (e.g. flame icon or red circle)
+Returns all three horizons merged into one FeatureCollection. Filter by `horizon` property.
+
+```json
+{
+  "type": "FeatureCollection",
+  "features": [{
+    "type": "Feature",
+    "geometry": { "type": "MultiPolygon", "coordinates": [...] },
+    "properties": {
+      "horizon":    "3h",
+      "risk_level": "high",
+      "cell_count": 84,
+      "prob_mean":  0.066,
+      "prob_max":   0.183
+    }
+  }]
+}
+```
+
+**Behaviour:**
+- Three toggle buttons: **3h / 6h / 12h** (show one or all horizons)
+- Colour by `risk_level`: high = red, medium = orange, low = yellow (all semi-transparent)
+- Tooltip: horizon, risk_level, prob_mean, prob_max, cell_count
+
+---
+
+## Roads Layer
+
+**Endpoint:** `GET /api/events/{event_id}/timesteps/{ts_id}/roads`
+
+```json
+{
+  "type": "FeatureCollection",
+  "features": [{
+    "type": "Feature",
+    "geometry": { "type": "LineString", "coordinates": [...] },
+    "properties": {
+      "road_name":    "881 Highway",
+      "highway":      "secondary",
+      "status":       "at_risk_3h",
+      "cut_at":       "at_risk_3h",
+      "cut_location": ["NE of Fort McMurray, 12 km", "SW of Anzac, 5 km"]
+    }
+  }]
+}
+```
+
+> `cut_at`: the risk zone where the road is first intersected (same enum as `status`; null if clear).
+>
+> `cut_location`: array of human-readable strings generated by `spatial.py::_describe_point()` —
+> nearest landmark + bearing + distance (e.g. `"NE of Fort McMurray, 12 km"`).
+> All cut points across all risk-zone boundaries are collected (≥ 2 entries when a road crosses
+> multiple zone boundaries). Also appears in `fire_context.json → road_summary[]` for AI agents.
+
+**Status colour:**
+| Status | Colour |
+|--------|--------|
+| burned | dark red |
+| at_risk_3h | red |
+| at_risk_6h | orange |
+| at_risk_12h | yellow |
+| clear | grey |
+
+**Behaviour:**
+- Render roads coloured by status
+- Show `cut_location` label at intersection point for at-risk segments
+- Tooltip: road_name, status, cut_location (human-readable)
+
+---
+
+## Analysis Panel (Population Counts)
+
+**Endpoint:** `GET /api/events/{event_id}/timesteps/{ts_id}/analysis`
+
+```json
+{
+  "affected_population": 45200,
+  "at_risk_3h":          12400,
+  "at_risk_6h":          18700,
+  "at_risk_12h":         27100
+}
+```
+
+**Behaviour:**
+- Sidebar panel showing the four counts
+- Updated on every timestep change
+
+---
+
+## Fire Context Panel (Weather / FWI / Wind Forecast)
+
+> `fire_context.json` is the **single input** to all AI agents (`risk_agent`, `impact_agent`, `evacuation_agent`).
+> It includes `road_summary[]` (added by `spatial.py`) with human-readable cut locations.
+> Fetching this endpoint is a prerequisite for generating the AI report.
+
+**Endpoint:** `GET /api/events/{event_id}/timesteps/{ts_id}/fire-context`
+
+```json
+{
+  "t1": "2016-05-04T08:54:00",
+  "fire": {
+    "burned_area_km2": 87.34,
+    "growth_rate_km2h": 4.61,
+    "n_hotspots": 47,
+    "frp_sum": 1823.6
+  },
+  "weather_t1": {
+    "wind_speed_kmh": 32.4,
+    "wind_dir": 245.1,
+    "temp_c": 28.7,
+    "rh": 15.2
+  },
+  "fwi_t1": {
+    "ffmc": 94.2,
+    "isi": 18.7,
+    "ros_mean_mh": 425.0,
+    "ros_max_mh": 1240.0
+  },
+  "wind_forecast": [
+    { "hour": 0, "speed_kmh": 32.4, "dir": 245.1 },
+    { "hour": 1, "speed_kmh": 33.1, "dir": 248.0 }
+  ]
+}
+```
+
+**Behaviour:**
+- Fire metrics card: area, growth rate, hotspot count
+- Weather card: wind speed/dir, temp, RH
+- FWI card: FFMC, ISI, ROS
+- Wind forecast: small chart or arrow icons for the 13h window
+
+---
+
+## AI Situation Report
+
+**Endpoint:** `POST /api/events/{event_id}/timesteps/{ts_id}/report`
+
+No request body needed. Backend checks for cached `ai_summary.json` first —
+only calls AI agents if the file doesn't exist (see `agents/risk_agent.py`, `impact_agent.py`, `evacuation_agent.py`, `summary_agent.py`).
+
+```json
+{
+  "risk_analysis":       "...",
+  "impact_analysis":     "...",
+  "evacuation_analysis": "...",
+  "situation_overview":  "..."
+}
+```
+
+**Behaviour:**
+- On timestep load: check `GET /api/events/{id}/timesteps/{ts_id}/fire-context`
+  - If fire_context exists → show "Generate Report" button
+  - If not → hide button (prediction not done yet)
+- On timestep load: try `POST /report` immediately (returns instantly if cached `ai_summary.json` exists)
+  - If 200 and has content → display report directly (no button needed)
+  - If 422 → prediction not ready, hide report section
+- "Generate Report" button only shown when fire_context exists but report not yet cached
+- Show loading spinner while generating (10–30s first time, agents run sequentially)
+- Display the four sections as formatted text cards
+
+---
+
+## Chat Assistant
+
+**Endpoint:** `POST /api/events/{event_id}/chat`
+
+```json
+{
+  "message":     "What areas should be evacuated first?",
+  "timestep_id": 42,
+  "history": [
+    { "role": "user",      "content": "..." },
+    { "role": "assistant", "content": "..." }
+  ]
+}
+```
+
+**Response:** Streamed `text/plain`.
+
+**Behaviour:**
+- Chat panel in sidebar
+- Stream response token by token
+- Include `timestep_id` to seed assistant with situation_overview + road_summary context
+- Maintain `history` array client-side for multi-turn conversation
+- AI response always ends with **3 suggested follow-up questions** (delimited section at end of stream)

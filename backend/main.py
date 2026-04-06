@@ -45,10 +45,30 @@ def create_app():
 
 
 if __name__ == '__main__':
-    from pipeline import build_env
+    import threading
+    from pipeline.db import setup_db
+
     app = create_app()
-    # Werkzeug debug mode runs two processes: reloader parent (WERKZEUG_RUN_MAIN unset)
-    # and server child (WERKZEUG_RUN_MAIN=true). Only run build_env once in the child.
-    # use_reloader=False avoids the double-run entirely.
-    build_env(app)
-    app.run(host='0.0.0.0', debug=True, use_reloader=False, port=5000)
+
+    # DB setup must finish before Flask starts (creates tables, seeds events)
+    setup_db(app)
+
+    # Run the slow env-prep + prediction pipeline in the background
+    # so Flask starts immediately and serves the UI while data is being built.
+    def _background_pipeline():
+        from pipeline.env import prepare_all_events
+        from pipeline.check import run_checks, build_playback_events, build_realtime_events
+        print("=== Preparing environment (background) ===")
+        prepare_all_events(app)
+        print("=== Building event data (background) ===")
+        with app.app_context():
+            build_playback_events()
+            build_realtime_events()
+        print("=== Environment check (background) ===")
+        run_checks(app)
+        print("=== Pipeline complete ===")
+
+    t = threading.Thread(target=_background_pipeline, daemon=True, name="pipeline")
+    t.start()
+
+    app.run(host='0.0.0.0', debug=False, port=5000)

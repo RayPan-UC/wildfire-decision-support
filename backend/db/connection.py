@@ -54,33 +54,46 @@ def ensure_db():
 def seed_db():
     """Insert initial data if the database is empty.
 
-    Only runs when fire_events has no rows, so it's safe to call on every startup
-    without duplicating data.
+    Also patches any existing events that are missing end_date (treated as
+    realtime otherwise, which crashes the pipeline). Safe to call on every startup.
     """
     from db.models import FireEvent
-    if FireEvent.query.count() > 0:
+    from geoalchemy2 import WKTElement
+
+    _SEED_NAME    = 'Fort McMurray Wildfire 2016'
+    _SEED_END     = '2016-05-15'
+    _SEED_TIME_END = '2016-05-15 23:59:59+00'
+
+    if FireEvent.query.count() == 0:
+        events = [
+            FireEvent(
+                name        = _SEED_NAME,
+                year        = 2016,
+                bbox        = WKTElement(
+                    'POLYGON((-112.634 56.157, -110.002 56.157, -110.002 57.380, -112.634 57.380, -112.634 56.157))',
+                    srid=4326
+                ),
+                time_start  = '2016-05-01 00:00:00+00',
+                time_end    = _SEED_TIME_END,
+                end_date    = _SEED_END,
+                description = (
+                    'The 2016 Horse River Wildfire (MWF-009) forced the evacuation of approximately '
+                    '88,000 residents from Fort McMurray, Alberta. It burned approximately 590,000 '
+                    'hectares and is the costliest disaster in Canadian history.'
+                ),
+            ),
+        ]
+        db.session.add_all(events)
+        db.session.commit()
+        print(f"[db] seeded {len(events)} fire event(s)")
         return
 
-    from geoalchemy2 import WKTElement
-    events = [
-        FireEvent(
-            name        = 'Fort McMurray Wildfire 2016',
-            year        = 2016,
-            bbox        = WKTElement(
-                'POLYGON((-112.634 56.157, -110.002 56.157, -110.002 57.380, -112.634 57.380, -112.634 56.157))',
-                srid=4326
-            ),
-            time_start  = '2016-05-01 00:00:00+00',
-            time_end    = '2016-05-15 23:59:59+00',
-            end_date    = '2016-05-15',
-            description = (
-                'The 2016 Horse River Wildfire (MWF-009) forced the evacuation of approximately '
-                '88,000 residents from Fort McMurray, Alberta. It burned approximately 590,000 '
-                'hectares and is the costliest disaster in Canadian history.'
-            ),
-        ),
-    ]
-
-    db.session.add_all(events)
-    db.session.commit()
-    print(f"[db] seeded {len(events)} fire event(s)")
+    # Patch any existing event missing end_date — without it the pipeline
+    # treats the event as realtime and crashes on event.end_date.strftime().
+    patched = 0
+    for event in FireEvent.query.filter(FireEvent.end_date.is_(None)).all():
+        event.end_date = _SEED_END
+        patched += 1
+    if patched:
+        db.session.commit()
+        print(f"[db] patched end_date on {patched} existing fire event(s)")

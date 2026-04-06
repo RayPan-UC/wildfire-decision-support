@@ -84,6 +84,15 @@ def _prepare_event(event) -> None:
         print("[env] Preprocessing fuel type map ...")
         whp.preprocess_environment(study, sources=["landcover"])
 
+    terrain_raw_dir = study.project_dir / "data_raw" / "terrain"
+    if not (terrain_raw_dir / "dtm.tif").exists():
+        print("[env] Downloading terrain (DEM, slope, aspect) ...")
+        whp.collect_environment(study, sources=["terrain"])
+    _patch_terrain_crs(terrain_raw_dir)
+    if not (study.project_dir / "data_processed" / "terrain" / "dtm.tif").exists():
+        print("[env] Preprocessing terrain ...")
+        whp.preprocess_environment(study, sources=["terrain"])
+
     fwi_path = study.weather_dir / "ffmc_daily.parquet"
     if not fwi_path.exists():
         print("[env] Building FWI indices ...")
@@ -113,6 +122,56 @@ def _prepare_event(event) -> None:
     fire_state = build_fire_state(hotspot_data)
     save_fire_state(fire_state, fire_state_path)
     print(f"[env] fire_state.pkl written → {fire_state_path}")
+
+
+def _patch_terrain_crs(terrain_raw_dir: Path) -> None:
+    """Rewrite terrain TIFs with EPSG:3978 CRS using WKT (no proj.db lookup needed).
+
+    MRDEM downloads use NAD83(CSRS)/Canada Atlas Lambert which some PROJ
+    installations read as EngineeringCRS (unknown datum), blocking reprojection.
+    NAD83(CSRS) and NAD83 differ by < 1 m — negligible at our 500 m grid.
+    """
+    import rasterio
+    from rasterio.crs import CRS
+
+    # WKT for EPSG:3978 — avoids CRS.from_epsg() which needs proj.db
+    _WKT_3978 = (
+        'PROJCS["NAD83 / Canada Atlas Lambert",'
+        'GEOGCS["NAD83",DATUM["North_American_Datum_1983",'
+        'SPHEROID["GRS 1980",6378137,298.257222101]],'
+        'PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],'
+        'PROJECTION["Lambert_Conformal_Conic_2SP"],'
+        'PARAMETER["standard_parallel_1",49],'
+        'PARAMETER["standard_parallel_2",77],'
+        'PARAMETER["latitude_of_origin",49],'
+        'PARAMETER["central_meridian",-95],'
+        'PARAMETER["false_easting",0],'
+        'PARAMETER["false_northing",0],'
+        'UNIT["metre",1]]'
+    )
+    target_crs = CRS.from_wkt(_WKT_3978)
+
+    for fname in ("dtm.tif", "slope.tif", "aspect.tif"):
+        path = terrain_raw_dir / fname
+        if not path.exists():
+            continue
+        try:
+            with rasterio.open(path) as src:
+                try:
+                    if src.crs and src.crs.to_epsg() == 3978:
+                        continue  # already correct
+                except Exception:
+                    pass  # CRS unreadable — patch it anyway
+                data = src.read()
+                meta = src.meta.copy()
+            meta["crs"] = target_crs
+            tmp = path.with_suffix(".patched.tif")
+            with rasterio.open(tmp, "w", **meta) as dst:
+                dst.write(data)
+            tmp.replace(path)
+            print(f"[env] terrain CRS patched → {fname}")
+        except Exception as e:
+            log.warning("[env] could not patch terrain CRS for %s: %s", fname, e)
 
 
 def _fetch_landmarks(event, study) -> None:

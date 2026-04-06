@@ -35,7 +35,7 @@ def create_app():
 
     @app.route('/explore')
     def explore():
-        return render_template('home.htm')
+        return render_template('index.htm')
 
     @app.route('/login')
     def login():

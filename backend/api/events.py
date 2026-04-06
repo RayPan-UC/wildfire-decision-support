@@ -14,7 +14,7 @@ def _serialize(e):
         'time_start':  e.time_start.isoformat() if e.time_start else None,
         'time_end':    e.time_end.isoformat() if e.time_end else None,
         'description': e.description,
-        'bbox':        list(bounds)  # [minLon, minLat, maxLon, maxLat]
+        'bbox':        list(bounds),  # [minLon, minLat, maxLon, maxLat]
     }
 
 
@@ -22,3 +22,11 @@ def _serialize(e):
 def list_events():
     events = FireEvent.query.order_by(FireEvent.year.desc()).all()
     return jsonify([_serialize(e) for e in events]), 200
+
+
+@events_bp.route('/<int:event_id>', methods=['GET'])
+def get_event(event_id: int):
+    event = FireEvent.query.get(event_id)
+    if not event:
+        return jsonify({'error': 'event not found'}), 404
+    return jsonify(_serialize(event)), 200

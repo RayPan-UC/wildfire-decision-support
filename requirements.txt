@@ -16,7 +16,7 @@ cdsapi
 osmium
 pyarrow
 anthropic
-google-generativeai
+requests
 xarray
 netCDF4
 dask

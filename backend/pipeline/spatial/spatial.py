@@ -86,6 +86,7 @@ def _build_roads(bbox, perimeter_geom, risk: dict, landmarks: list) -> gpd.GeoDa
         return gpd.GeoDataFrame(columns=["road_name","highway","status","cut_at","cut_location","geometry"],
                                 geometry="geometry", crs="EPSG:4326")
 
+
     roads = gpd.read_file(roads_path, bbox=bbox)
     roads = roads[roads["highway"].isin(_ROAD_TYPES)].copy()
     roads["name"] = roads["name"].fillna("").str.strip()
@@ -116,7 +117,7 @@ def _build_roads(bbox, perimeter_geom, risk: dict, landmarks: list) -> gpd.GeoDa
     dissolved = dissolved.merge(agg, on=["road_name", "status"])
 
     dissolved["cut_at"]       = dissolved["road_name"].map(lambda r: cut_map.get(r, {}).get("cut_at"))
-    dissolved["cut_location"] = dissolved["road_name"].map(lambda r: cut_map.get(r, {}).get("cut_location"))
+    dissolved["cut_location"] = dissolved["road_name"].map(lambda r: cut_map.get(r, {}).get("cut_location") or None)
 
     return gpd.GeoDataFrame(
         dissolved[["road_name", "highway", "status", "cut_at", "cut_location", "geometry"]],
@@ -125,6 +126,11 @@ def _build_roads(bbox, perimeter_geom, risk: dict, landmarks: list) -> gpd.GeoDa
 
 
 def _build_cut_map(roads, perimeter_geom, risk_geoms: dict, landmarks: list) -> dict:
+    """Returns dict: road_name → {"cut_at": worst_zone, "cut_location": [loc, ...]}
+
+    cut_at       — most severe zone that intersects the road (zone label string)
+    cut_location — list of all unique cut-point descriptions across all zone boundaries
+    """
     zones = {}
     if perimeter_geom:
         zones["perimeter"] = perimeter_geom.boundary
@@ -142,18 +148,18 @@ def _build_cut_map(roads, perimeter_geom, risk_geoms: dict, landmarks: list) -> 
                 ix if ix.geom_type == "Point" else ix.centroid
             ]
             rn = row["road_name"]
+            entry = cut_map.setdefault(rn, {"cut_at": zone_name, "cut_location": []})
+            # keep cut_at as the most severe zone
+            current_key = "burned" if entry["cut_at"] == "perimeter" else entry["cut_at"]
+            if _STATUS_RANK.get(status_key, 99) < _STATUS_RANK.get(current_key, 99):
+                entry["cut_at"] = zone_name
+            # collect all unique cut-point descriptions
             for pt in pts:
                 loc = _describe_point(pt.x, pt.y, landmarks)
-                entry = cut_map.setdefault(rn, {"cut_at": zone_name, "cut_location": loc})
-                if _STATUS_RANK.get(status_key, 99) < _STATUS_RANK.get(
-                    "burned" if entry["cut_at"] == "perimeter" else entry["cut_at"], 99
-                ):
-                    entry["cut_at"] = zone_name
-                    entry["cut_location"] = loc
-                elif zone_name == entry["cut_at"] and loc != entry["cut_location"]:
-                    entry["cut_location"] += f" / {loc}"
+                if loc not in entry["cut_location"]:
+                    entry["cut_location"].append(loc)
 
-    # replace "perimeter" with None in cut_at (already burned, no future cut)
+    # burned roads have no future cut point — clear both fields
     for v in cut_map.values():
         if v["cut_at"] == "perimeter":
             v["cut_at"] = None
@@ -175,6 +181,11 @@ def _road_summary(roads_gdf: gpd.GeoDataFrame) -> list[dict]:
             continue
         cut_at  = grp.iloc[0]["cut_at"]
         cut_loc = grp.iloc[0]["cut_location"]
+        # pandas may store None as NaN for string columns — normalise
+        if not isinstance(cut_at, str):
+            cut_at = None
+        if not isinstance(cut_loc, list):
+            cut_loc = None
         summary.append({
             "road":         road,
             "highway":      grp.iloc[0]["highway"],

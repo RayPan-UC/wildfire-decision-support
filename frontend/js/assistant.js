@@ -1,51 +1,75 @@
-const CHAT_API_URL = 'http://localhost:5000/api/chat/';
+// assistant.js — Wildfire chat sidebar
+// Posts to /api/events/<id>/chat with streaming text/plain response.
 
-// Find the HTML elements
-const chatInput = document.getElementById('chat-input');
-const sendBtn = document.getElementById('chat-send');
+const chatInput    = document.getElementById('chat-input');
+const sendBtn      = document.getElementById('chat-send');
 const chatMessages = document.getElementById('chat-messages');
 
-// Main function to send the message
-async function sendMessage(text) {
-    if (!text) return;
+// Conversation history sent to backend for context
+let chatHistory = [];
 
-    // Show message on the screen
-    chatMessages.innerHTML += `<div style="color: white; margin-bottom: 8px;"><b>You:</b> ${text}</div>`;
-    chatInput.value = ''; // Clear the box
-    chatMessages.scrollTop = chatMessages.scrollHeight; // Scroll to bottom
+function appendMessage(role, text) {
+    const color = role === 'user' ? '#fff' : '#ff6b35';
+    const label = role === 'user' ? 'You' : 'AI';
+    const div = document.createElement('div');
+    div.style.cssText = `color:${color};margin-bottom:10px;line-height:1.5;`;
+    div.innerHTML = `<b>${label}:</b> ${text}`;
+    chatMessages.appendChild(div);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+    return div;
+}
+
+async function sendMessage(text) {
+    if (!text.trim()) return;
+    chatInput.value = '';
+
+    appendMessage('user', text);
+    chatHistory.push({ role: 'user', content: text });
+
+    // Need event id and current timestep from wildfire.js globals
+    const eventId  = (typeof currentEvent !== 'undefined' && currentEvent) ? currentEvent.id : 1;
+    const tsId     = (typeof currentTs    !== 'undefined' && currentTs)    ? currentTs.id    : null;
+
+    const aiDiv = appendMessage('assistant', '…');
 
     try {
-        // Send the text to Python
-        const response = await fetch(CHAT_API_URL, {
-            method: 'POST',
+        const res = await fetch(`/api/events/${eventId}/chat`, {
+            method:  'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: text })
+            body: JSON.stringify({
+                message:     text,
+                timestep_id: tsId,
+                history:     chatHistory.slice(-10),   // last 10 turns for context
+            }),
         });
 
-        const data = await response.json();
+        if (!res.ok) {
+            aiDiv.innerHTML = `<b>AI:</b> <span style="color:#ef4444">Error ${res.status} — chat not available.</span>`;
+            return;
+        }
 
-        // Show the Python server's answer on the screen
-        chatMessages.innerHTML += `<div style="color: #ff6b35; margin-bottom: 12px;"><b>AI:</b> ${data.response}</div>`;
-        chatMessages.scrollTop = chatMessages.scrollHeight;
+        // Stream the response token by token
+        const reader  = res.body.getReader();
+        const decoder = new TextDecoder();
+        let full = '';
 
-    } catch (error) {
-        chatMessages.innerHTML += `<div style="color: red; margin-bottom: 12px;"><b>Error:</b> Could not reach Python server.</div>`;
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            full += decoder.decode(value, { stream: true });
+            aiDiv.innerHTML = `<b>AI:</b> ${full}`;
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        chatHistory.push({ role: 'assistant', content: full });
+
+    } catch (err) {
+        aiDiv.innerHTML = `<b>AI:</b> <span style="color:#ef4444">Could not reach server.</span>`;
+        console.error('[assistant] chat error:', err);
     }
 }
 
-// Listen for clicks on the Send button
-sendBtn.addEventListener('click', () => {
-    sendMessage(chatInput.value.trim());
-});
+sendBtn.addEventListener('click', () => sendMessage(chatInput.value));
+chatInput.addEventListener('keypress', e => { if (e.key === 'Enter') sendMessage(chatInput.value); });
 
-// Listen for the Enter key
-chatInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-        sendMessage(chatInput.value.trim());
-    }
-});
-
-// Connect the Quick Action buttons at the top
-function quickAsk(question) {
-    sendMessage(question);
-}
+function quickAsk(question) { sendMessage(question); }

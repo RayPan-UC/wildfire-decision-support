@@ -14,3 +14,6 @@ data/events/
 # Cache
 data/cache/
 data/scripts/cache/
+
+# Large geodata prep files
+data_prep/

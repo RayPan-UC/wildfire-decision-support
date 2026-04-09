@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from pathlib import Path
 
 import pandas as pd
@@ -53,7 +52,7 @@ def _load_study(event):
     return whp.Study(
         name        = event.name,
         bbox        = (lon_min, lat_min, lon_max, lat_max),
-        start_date  = event.time_start.strftime("%Y-%m-%d"),
+        start_date  = event.start_date.strftime("%Y-%m-%d"),
         end_date    = event.end_date.strftime("%Y-%m-%d"),
         project_dir = project_dir,
     )
@@ -69,7 +68,7 @@ def _load_fire_state(study):
 
 def _load_predictor():
     import wildfire_hotspot_prediction as whp
-    return whp.WildfirePredictor(models_dir=_MODELS_DIR, model_name="rf")
+    return whp.WildfirePredictor(models_dir=_MODELS_DIR, model_name="lr_steps")
 
 
 def _load_threshold() -> float:
@@ -143,17 +142,12 @@ def _build_event(event) -> None:
 # ── Slot generation ───────────────────────────────────────────────────────────
 
 def _generate_slots(event) -> list[pd.Timestamp]:
-    """Generate 3-hour canonical slots from event.time_start to event.time_end (tz-naive UTC)."""
+    """Generate 3-hour canonical slots from event.start_date to event.end_date (tz-naive)."""
     from datetime import timedelta
 
-    def _to_naive(ts) -> pd.Timestamp:
-        t = pd.Timestamp(ts)
-        if t.tzinfo is not None:
-            t = t.tz_convert("UTC").tz_localize(None)
-        return t
-
-    start = _to_naive(event.time_start).floor("3h")
-    end   = _to_naive(event.time_end)
+    start = pd.Timestamp(event.start_date).floor("3h")
+    # end_date is a date — treat end-of-day as the inclusive upper bound
+    end = pd.Timestamp(event.end_date) + pd.Timedelta(hours=23, minutes=59)
     slots, t = [], start
     while t <= end:
         slots.append(t)
@@ -225,6 +219,8 @@ def _build_timestep(event, ts, study, fire_state, predictor, threshold, pred_cac
     if ts.prediction_status == "done" and ts.spatial_analysis_status not in ("done", "failed"):
         _run_spatial_stage(event, ts, pbar)
 
+    _run_weather_stage(event, ts, study, pbar)
+
 
 def _run_prediction_stage(event, ts, study, fire_state, predictor, threshold, pred_cache, pbar=None) -> None:
     from pipeline.predict import run_prediction
@@ -235,7 +231,7 @@ def _run_prediction_stage(event, ts, study, fire_state, predictor, threshold, pr
     try:
         t1 = pd.Timestamp(ts.nearest_t1)
         if t1.tzinfo is not None:
-            t1 = t1.tz_convert("UTC").tz_localize(None)
+            t1 = t1.tz_localize(None)   # strip tz only — fire_state keys are naive local time
         run_prediction(
             ts_id         = ts.id,
             overpass_time = t1,
@@ -250,6 +246,22 @@ def _run_prediction_stage(event, ts, study, fire_state, predictor, threshold, pr
     except Exception as e:
         tqdm.write(f"[builder] prediction failed for ts {ts.id}: {e}")
         _set_status(ts.id, "prediction_status", "failed")
+
+
+def _run_weather_stage(event, ts, study, pbar=None) -> None:
+    from pipeline.weather import build_weather_forecast
+    from tqdm import tqdm
+
+    out_dir = timestep_dir(event.id, event.year, ts.slot_time) / "weather"
+    if (out_dir / "forecast.json").exists():
+        return
+    try:
+        t1 = pd.Timestamp(ts.nearest_t1)
+        if t1.tzinfo is not None:
+            t1 = t1.tz_localize(None)
+        build_weather_forecast(study=study, t1=t1, out_dir=out_dir)
+    except Exception as e:
+        tqdm.write(f"[builder] weather forecast failed for ts {ts.id}: {e}")
 
 
 def _run_spatial_stage(event, ts, pbar=None) -> None:
@@ -281,18 +293,19 @@ def _run_spatial_stage(event, ts, pbar=None) -> None:
 
 def _merge_fire_context(spatial_out_dir: Path, road_summary: list) -> None:
     """Append road_summary into the sibling prediction/fire_context.json."""
+    import math
+
     ctx_path = spatial_out_dir.parent / "prediction" / "fire_context.json"
     if not ctx_path.exists():
         return
     try:
         ctx = json.loads(ctx_path.read_text(encoding="utf-8"))
         ctx["road_summary"] = road_summary
-        ctx_path.write_text(json.dumps(ctx, ensure_ascii=False, indent=2), encoding="utf-8")
+        # Sanitize NaN/Inf values that json.dumps would write as non-standard tokens
+        text = json.dumps(ctx, ensure_ascii=False, indent=2)
+        import re
+        text = re.sub(r'\bNaN\b', 'null', text)
+        text = re.sub(r'\bInfinity\b', 'null', text)
+        ctx_path.write_text(text, encoding="utf-8")
     except Exception as e:
         log.warning("[builder] could not merge road_summary into fire_context: %s", e)
-
-
-def _load_geojson(path: Path) -> dict:
-    if path.exists():
-        return json.loads(path.read_text(encoding="utf-8"))
-    return {"type": "FeatureCollection", "features": []}

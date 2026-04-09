@@ -76,7 +76,8 @@ def run_prediction(
     # ── fire_context.json ─────────────────────────────────────────────────────
     ctx_path = out_dir / "fire_context.json"
     if not ctx_path.exists() and intermediates:
-        ctx_path.write_text(json.dumps(intermediates, ensure_ascii=False, indent=2),
+        ctx = {k: v for k, v in intermediates.items() if k != "wind_forecast"}
+        ctx_path.write_text(json.dumps(ctx, ensure_ascii=False, indent=2),
                             encoding="utf-8")
         log.info("[prediction] ts=%d fire_context.json written", ts_id)
 
@@ -100,6 +101,18 @@ def _export_perimeter(fire_state, t1: pd.Timestamp, out_path: Path) -> None:
     from shapely.ops import transform as shp_transform
 
     geom = fire_state.boundary_after.get(t1)
+
+    # Fallback: exact key lookup can fail due to timezone / precision mismatch
+    # after DB round-trip. Find the nearest key within a 2-hour window.
+    if geom is None:
+        candidate_keys = [k for k, v in fire_state.boundary_after.items() if v is not None]
+        if candidate_keys:
+            nearest = min(candidate_keys,
+                          key=lambda k: abs((pd.Timestamp(k) - t1).total_seconds()))
+            if abs((pd.Timestamp(nearest) - t1).total_seconds()) <= 7200:
+                geom = fire_state.boundary_after[nearest]
+                log.debug("[prediction] perimeter: t1=%s → nearest key %s", t1, nearest)
+
     if geom is None or geom.is_empty:
         write_geojson(out_path, [])
         return

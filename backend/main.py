@@ -1,5 +1,5 @@
 import config  # loads .env variables
-from flask import Flask, render_template
+from flask import Flask
 from flask_cors import CORS
 from pathlib import Path
 from db.connection import db, get_db_uri
@@ -9,12 +9,7 @@ FRONTEND_DIR = BASE_DIR.parent / "frontend"
 
 
 def create_app():
-    app = Flask(
-        __name__,
-        template_folder=str(FRONTEND_DIR),
-        static_folder=str(FRONTEND_DIR),
-        static_url_path='',
-    )
+    app = Flask(__name__)
     CORS(app)
     app.config['SQLALCHEMY_DATABASE_URI'] = get_db_uri()
     db.init_app(app)
@@ -23,52 +18,62 @@ def create_app():
     from api.auth      import auth_bp
     from api.events    import events_bp
     from api.timesteps import timesteps_bp
+    from api.firms     import firms_bp
+    from api.config    import config_bp
+    from api.satellite  import satellite_bp
 
     app.register_blueprint(auth_bp,      url_prefix='/api/auth')
     app.register_blueprint(events_bp,    url_prefix='/api/events')
     app.register_blueprint(timesteps_bp, url_prefix='/api')
+    app.register_blueprint(firms_bp,     url_prefix='/api/firms')
+    app.register_blueprint(config_bp,    url_prefix='/api/config')
+    app.register_blueprint(satellite_bp,  url_prefix='/api/satellite')
 
     # ── Frontend routes ───────────────────────────────────────────────────────
-    @app.route('/')
-    def home():
-        return render_template('home.htm')
+    from flask import send_from_directory
 
-    @app.route('/explore')
-    def explore():
-        return render_template('index.htm')
+    @app.route('/demo')
+    @app.route('/demo/')
+    def demo():
+        return send_from_directory(str(FRONTEND_DIR), 'index.html')
 
-    @app.route('/login')
-    def login():
-        return render_template('login.htm')
+    @app.route('/css/<path:filename>')
+    def frontend_css(filename):
+        return send_from_directory(str(FRONTEND_DIR / 'css'), filename)
+
+    @app.route('/js/<path:filename>')
+    def frontend_js(filename):
+        return send_from_directory(str(FRONTEND_DIR / 'js'), filename)
+
+    @app.route('/demo/<path:filename>')
+    def demo_static(filename):
+        return send_from_directory(str(FRONTEND_DIR), filename)
 
     return app
 
 
 if __name__ == '__main__':
-    import threading
     from pipeline.db import setup_db
+    from pipeline.env import prepare_all_events
+    from pipeline.check import run_checks, build_playback_events, build_realtime_events
 
     app = create_app()
 
-    # DB setup must finish before Flask starts (creates tables, seeds events)
+    # ── Pipeline (runs to completion before Flask starts) ─────────────────────
+    print("=== Setting up database ===")
     setup_db(app)
+    print("=== Database ready ===")
 
-    # Run the slow env-prep + prediction pipeline in the background
-    # so Flask starts immediately and serves the UI while data is being built.
-    def _background_pipeline():
-        from pipeline.env import prepare_all_events
-        from pipeline.check import run_checks, build_playback_events, build_realtime_events
-        print("=== Preparing environment (background) ===")
-        prepare_all_events(app)
-        print("=== Building event data (background) ===")
-        with app.app_context():
-            build_playback_events()
-            build_realtime_events()
-        print("=== Environment check (background) ===")
-        run_checks(app)
-        print("=== Pipeline complete ===")
+    print("=== Preparing environment ===")
+    prepare_all_events(app)
 
-    t = threading.Thread(target=_background_pipeline, daemon=True, name="pipeline")
-    t.start()
+    print("=== Building event data ===")
+    with app.app_context():
+        build_playback_events()
+        build_realtime_events()
 
+    print("=== Environment check ===")
+    run_checks(app)
+
+    print("=== Pipeline complete — starting Flask ===")
     app.run(host='0.0.0.0', debug=False, port=5000)

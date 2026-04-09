@@ -11,5 +11,6 @@ data/static/osm/*
 # Generated event data (regenerate via: python pipeline.py clip <event_id> --all)
 data/events/
 
-# Script cache
+# Cache
+data/cache/
 data/scripts/cache/

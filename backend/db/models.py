@@ -16,13 +16,12 @@ class FireEvent(db.Model):
     name        = db.Column(db.Text, nullable=False)
     year        = db.Column(db.Integer)
     bbox        = db.Column(Geometry("POLYGON", srid=4326))
-    time_start  = db.Column(db.DateTime(timezone=True))
-    time_end    = db.Column(db.DateTime(timezone=True))
+    start_date  = db.Column(db.Date, nullable=False)
     description = db.Column(db.Text)
 
     # Pipeline mode control:
     #   NULL  → Realtime: pipeline fetches latest data on each run
-    #   value → Replay:   historical analysis up to this date
+    #   value → Replay:   historical analysis up to this date (inclusive)
     end_date    = db.Column(db.Date, nullable=True)
 
     timesteps   = db.relationship("EventTimestep", backref="event", lazy=True)

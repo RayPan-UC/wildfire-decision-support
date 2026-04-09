@@ -3,10 +3,9 @@ pipeline/predict/risk_zones.py
 ------------------------------
 Convert ML prediction output (500m grid cells) → risk zone GeoJSON polygons.
 
-Risk level thresholds (relative to Youden's J threshold):
-    high   : prob >= youden_threshold
-    medium : prob >= youden_threshold * 0.5
-    low    : prob >= youden_threshold * 0.25
+Only the 'high' risk level (prob >= youden_threshold) is exported.
+Boundary smoothing is applied via morphological closing in EPSG:3978
+before reprojection to WGS84.
 """
 
 from __future__ import annotations
@@ -19,31 +18,34 @@ import pandas as pd
 
 log = logging.getLogger(__name__)
 
-_MEDIUM_RATIO = 0.5
-_LOW_RATIO    = 0.25
+# Morphological closing parameters (metres, in EPSG:3978)
+_SMOOTH_OUT = 300.0   # expand to fill gaps between adjacent cells
+_SMOOTH_IN  = 300.0   # contract back — net area preserved, edges rounded
 
 
-def load_youden_threshold(models_dir: Path, model_name: str = "rf") -> float:
-    """Load Youden's J threshold from model_full_thresholds.json."""
+def load_youden_threshold(
+    models_dir: Path,
+    model_name: str = "lr_steps",
+    scale: float = 1.5,
+) -> float:
+    """Load Youden's J threshold from model_full_thresholds.json.
+
+    Args:
+        scale: Multiplier applied to the stored threshold before use.
+               Values > 1.0 raise the decision boundary (fewer predictions).
+               Capped at 0.95.
+    """
     path = models_dir / "model_full_thresholds.json"
-    if path.exists():
-        return json.loads(path.read_text()).get(model_name, 0.5)
-    log.warning("[risk_zones] thresholds.json not found — using 0.5")
-    return 0.5
-
-
-def _risk_level(prob: float, high_thresh: float) -> str | None:
-    if prob >= high_thresh:
-        return "high"
-    if prob >= high_thresh * _MEDIUM_RATIO:
-        return "medium"
-    if prob >= high_thresh * _LOW_RATIO:
-        return "low"
-    return None
+    raw = json.loads(path.read_text()).get(model_name, 0.5) if path.exists() else 0.5
+    if not path.exists():
+        log.warning("[risk_zones] thresholds.json not found — using 0.5")
+    thr = min(raw * scale, 0.95)
+    log.info("[risk_zones] threshold: %.4f × %.1f → %.4f", raw, scale, thr)
+    return thr
 
 
 def build_risk_geojson(df: pd.DataFrame, high_thresh: float, horizon: str) -> dict:
-    """Convert 500m grid cell predictions to merged risk-level polygons.
+    """Convert 500m grid cell predictions to a smoothed high-risk polygon.
 
     Args:
         df:          DataFrame with b_x, b_y, prob columns (EPSG:3978).
@@ -51,7 +53,7 @@ def build_risk_geojson(df: pd.DataFrame, high_thresh: float, horizon: str) -> di
         horizon:     Prediction horizon label, e.g. "3h", "6h", "12h".
 
     Returns:
-        GeoJSON FeatureCollection with up to 3 features (high/medium/low).
+        GeoJSON FeatureCollection with one feature (high risk zone only).
     """
     import pyproj
     from shapely.geometry import box
@@ -60,39 +62,36 @@ def build_risk_geojson(df: pd.DataFrame, high_thresh: float, horizon: str) -> di
 
     half = 250.0
 
-    df = df.copy()
-    df["risk"] = df["prob"].apply(lambda p: _risk_level(p, high_thresh))
-    df = df[df["risk"].notna()]
-
-    if df.empty:
+    high_df = df[df["prob"] >= high_thresh]
+    if high_df.empty:
         return {"type": "FeatureCollection", "features": []}
 
+    # Build and merge 500m grid boxes in projected CRS
+    polys  = [box(r.b_x - half, r.b_y - half, r.b_x + half, r.b_y + half)
+              for r in high_df.itertuples()]
+    merged = unary_union(polys)
+
+    # Smooth: morphological closing (buffer out then in) in EPSG:3978
+    merged = merged.buffer(_SMOOTH_OUT).buffer(-_SMOOTH_IN)
+
+    # Reproject to WGS84
     transformer = pyproj.Transformer.from_crs("EPSG:3978", "EPSG:4326", always_xy=True)
+    merged_wgs = shp_transform(transformer.transform, merged)
 
-    def to_wgs84(geom):
-        return shp_transform(transformer.transform, geom)
-
-    features = []
-    for level in ("high", "medium", "low"):
-        subset = df[df["risk"] == level]
-        if subset.empty:
-            continue
-        polys  = [box(r.b_x - half, r.b_y - half, r.b_x + half, r.b_y + half)
-                  for r in subset.itertuples()]
-        merged = to_wgs84(unary_union(polys))
-        features.append({
+    return {
+        "type": "FeatureCollection",
+        "features": [{
             "type": "Feature",
-            "geometry": merged.__geo_interface__,
+            "geometry": merged_wgs.__geo_interface__,
             "properties": {
                 "horizon":    horizon,
-                "risk_level": level,
-                "cell_count": len(subset),
-                "prob_mean":  round(float(subset["prob"].mean()), 4),
-                "prob_max":   round(float(subset["prob"].max()),  4),
+                "risk_level": "high",
+                "cell_count": len(high_df),
+                "prob_mean":  round(float(high_df["prob"].mean()), 4),
+                "prob_max":   round(float(high_df["prob"].max()),  4),
             },
-        })
-
-    return {"type": "FeatureCollection", "features": features}
+        }],
+    }
 
 
 def write_geojson(path: Path, features: list) -> None:

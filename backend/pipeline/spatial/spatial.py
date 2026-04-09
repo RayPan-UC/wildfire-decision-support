@@ -62,7 +62,7 @@ def run_spatial_analysis(event_id: int, ts_id: int, out_dir: Path) -> dict:
     bbox      = _event_bbox(event)
 
     # ── Roads ─────────────────────────────────────────────────────────────────
-    roads_gdf = _build_roads(bbox, perimeter_geom, risk, landmarks)
+    roads_gdf = _build_roads(bbox, perimeter_geom, risk, landmarks, ev_dir=ev_dir)
     roads_gdf.to_file(out_dir / "roads.geojson", driver="GeoJSON")
     log.info("[spatial] ts=%d: roads.geojson written (%d features)", ts_id, len(roads_gdf))
 
@@ -79,18 +79,29 @@ def run_spatial_analysis(event_id: int, ts_id: int, out_dir: Path) -> dict:
 
 # ── Road analysis ─────────────────────────────────────────────────────────────
 
-def _build_roads(bbox, perimeter_geom, risk: dict, landmarks: list) -> gpd.GeoDataFrame:
-    roads_path = _DATA_DIR / "static" / "roads_canada.gpkg"
-    if not roads_path.exists():
-        log.warning("[spatial] roads_canada.gpkg not found — skipping road analysis")
-        return gpd.GeoDataFrame(columns=["road_name","highway","status","cut_at","cut_location","geometry"],
-                                geometry="geometry", crs="EPSG:4326")
+def _build_roads(bbox, perimeter_geom, risk: dict, landmarks: list,
+                 ev_dir: Path | None = None) -> gpd.GeoDataFrame:
+    _EMPTY = gpd.GeoDataFrame(
+        columns=["road_name", "highway", "status", "cut_at", "cut_location", "geometry"],
+        geometry="geometry", crs="EPSG:4326",
+    )
 
-
-    roads = gpd.read_file(roads_path, bbox=bbox)
-    roads = roads[roads["highway"].isin(_ROAD_TYPES)].copy()
-    roads["name"] = roads["name"].fillna("").str.strip()
-    roads["road_name"] = roads["name"].where(roads["name"] != "", roads["highway"])
+    # Prefer pre-built per-event cache (written by env._prebuild_roads)
+    cached = (ev_dir / "data_processed" / "roads" / "roads_clipped.gpkg") if ev_dir else None
+    if cached and cached.exists():
+        roads = gpd.read_file(cached)
+        if roads.crs is None:
+            roads = roads.set_crs("EPSG:4326")
+        roads = roads.to_crs("EPSG:4326")
+    else:
+        roads_path = _DATA_DIR / "static" / "roads_canada.gpkg"
+        if not roads_path.exists():
+            log.warning("[spatial] roads_canada.gpkg not found — skipping road analysis")
+            return _EMPTY
+        roads = gpd.read_file(roads_path, bbox=bbox)
+        roads = roads[roads["highway"].isin(_ROAD_TYPES)].copy()
+        roads["name"] = roads["name"].fillna("").str.strip()
+        roads["road_name"] = roads["name"].where(roads["name"] != "", roads["highway"])
 
     # tag status per segment
     risk_geoms = {h: g for h, g in risk.items() if g is not None}
@@ -219,11 +230,24 @@ def _population_counts(bbox, perimeter_geom, risk: dict, fire_year: int | None) 
         return int(da.loc[mask, "population"].sum())
 
     r3, r6, r12 = risk.get(3), risk.get(6), risk.get(12)
+
+    # Build cumulative exclusion zones so each ring counts only "newly at risk"
+    # population not already counted in a closer horizon.
+    from shapely.ops import unary_union as _union
+
+    def _union_geoms(*geoms):
+        valid = [g for g in geoms if g is not None]
+        return _union(valid) if valid else None
+
+    exclude_3h  = perimeter_geom
+    exclude_6h  = _union_geoms(perimeter_geom, r3)
+    exclude_12h = _union_geoms(perimeter_geom, r3, r6)
+
     return {
         "affected_population": pop_in(perimeter_geom),
-        "at_risk_3h":          pop_in(r3, perimeter_geom),
-        "at_risk_6h":          pop_in(r6, r3),
-        "at_risk_12h":         pop_in(r12, r6),
+        "at_risk_3h":          pop_in(r3,  exclude_3h),
+        "at_risk_6h":          pop_in(r6,  exclude_6h),
+        "at_risk_12h":         pop_in(r12, exclude_12h),
     }
 
 

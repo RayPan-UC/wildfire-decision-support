@@ -60,9 +60,8 @@ def seed_db():
     from db.models import FireEvent
     from geoalchemy2 import WKTElement
 
-    _SEED_NAME    = 'Fort McMurray Wildfire 2016'
-    _SEED_END     = '2016-05-15'
-    _SEED_TIME_END = '2016-05-15 23:59:59+00'
+    _SEED_NAME = 'Fort McMurray Wildfire 2016'
+    _SEED_END  = '2016-05-31'
 
     if FireEvent.query.count() == 0:
         events = [
@@ -73,8 +72,7 @@ def seed_db():
                     'POLYGON((-112.634 56.157, -110.002 56.157, -110.002 57.380, -112.634 57.380, -112.634 56.157))',
                     srid=4326
                 ),
-                time_start  = '2016-05-01 00:00:00+00',
-                time_end    = _SEED_TIME_END,
+                start_date  = '2016-05-01',
                 end_date    = _SEED_END,
                 description = (
                     'The 2016 Horse River Wildfire (MWF-009) forced the evacuation of approximately '

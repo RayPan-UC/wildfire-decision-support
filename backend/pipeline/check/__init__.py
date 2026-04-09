@@ -7,10 +7,7 @@ Run `python prepare.py` first to download models, ERA5, and static GeoPackages.
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
-
-log = logging.getLogger(__name__)
 
 _DATA_DIR   = Path(__file__).resolve().parents[3] / "data"
 _MODELS_DIR = _DATA_DIR / "static" / "models"
@@ -75,54 +72,3 @@ def _check_events() -> None:
         else:
             print(f"[checks] {event.name} — OK")
 
-
-# ── Called from prepare.py ────────────────────────────────────────────────────
-
-def prepare_environment(event) -> None:
-    """Download all required files for a FireEvent. Run once before starting Flask."""
-    import wildfire_hotspot_prediction as whp
-    from shapely import wkb
-
-    geom = wkb.loads(bytes(event.bbox.data))
-    lon_min, lat_min, lon_max, lat_max = geom.bounds
-
-    project_dir = _DATA_DIR / "events" / f"{event.year}_{event.id:04d}"
-    study = whp.Study(
-        name        = event.name,
-        bbox        = (lon_min, lat_min, lon_max, lat_max),
-        start_date  = event.time_start.strftime("%Y-%m-%d"),
-        end_date    = event.end_date.strftime("%Y-%m-%d"),
-        project_dir = project_dir,
-    )
-
-    print("[prepare] Checking ML models ...")
-    whp.ensure_models(models_dir=_MODELS_DIR)
-
-    print("[prepare] Checking ERA5 coverage ...")
-    whp.ensure_era5_coverage(study)
-
-    print("[prepare] Checking static GeoPackages ...")
-    _download_static_gpkg()
-
-
-def _download_static_gpkg() -> None:
-    import requests
-
-    static_dir = _DATA_DIR / "static"
-    static_dir.mkdir(parents=True, exist_ok=True)
-
-    for filename, url in _STATIC_FILES.items():
-        dest = static_dir / filename
-        if dest.exists():
-            print(f"[prepare] {filename} — already exists, skip")
-            continue
-        print(f"[prepare] Downloading {filename} ...")
-        try:
-            with requests.get(url, stream=True, timeout=120) as r:
-                r.raise_for_status()
-                with open(dest, "wb") as f:
-                    for chunk in r.iter_content(chunk_size=1 << 20):
-                        f.write(chunk)
-            print(f"[prepare] {filename} — {dest.stat().st_size / 1e6:.1f} MB")
-        except Exception as e:
-            print(f"[prepare] ERROR: failed to download {filename}: {e}")

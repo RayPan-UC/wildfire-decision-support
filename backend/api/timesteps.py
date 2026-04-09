@@ -9,7 +9,9 @@ Routes (registered under /api):
     GET  /events/<id>/timesteps/<ts_id>/hotspots
     GET  /events/<id>/timesteps/<ts_id>/risk-zones
     GET  /events/<id>/timesteps/<ts_id>/roads
-    GET  /events/<id>/timesteps/<ts_id>/analysis
+    GET  /events/<id>/timesteps/<ts_id>/population
+    GET  /events/<id>/timesteps/<ts_id>/weather           ← ERA5 +12h area-avg forecast
+    GET  /events/<id>/timesteps/<ts_id>/wind-field?hour=N ← leaflet-velocity wind field
     GET  /events/<id>/timesteps/<ts_id>/fire-context
     POST /events/<id>/timesteps/<ts_id>/report      ← on-demand AI report
     POST /events/<id>/chat
@@ -21,6 +23,7 @@ import json
 from pathlib import Path
 
 from flask import Blueprint, Response, jsonify, request, stream_with_context
+from utils.auth_middleware import token_required
 
 timesteps_bp = Blueprint("timesteps", __name__)
 
@@ -68,6 +71,7 @@ def _read_json(path: Path) -> dict:
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @timesteps_bp.route("/events/<int:event_id>/timesteps", methods=["GET"])
+@token_required
 def list_timesteps(event_id: int):
     from db.models import FireEvent, EventTimestep
     event = FireEvent.query.get(event_id)
@@ -92,6 +96,7 @@ def list_timesteps(event_id: int):
 
 
 @timesteps_bp.route("/events/<int:event_id>/timesteps/<int:ts_id>/perimeter", methods=["GET"])
+@token_required
 def get_perimeter(event_id: int, ts_id: int):
     result, err = _get_event_and_ts(event_id, ts_id)
     if err:
@@ -101,6 +106,7 @@ def get_perimeter(event_id: int, ts_id: int):
 
 
 @timesteps_bp.route("/events/<int:event_id>/timesteps/<int:ts_id>/hotspots", methods=["GET"])
+@token_required
 def get_hotspots(event_id: int, ts_id: int):
     result, err = _get_event_and_ts(event_id, ts_id)
     if err:
@@ -110,6 +116,7 @@ def get_hotspots(event_id: int, ts_id: int):
 
 
 @timesteps_bp.route("/events/<int:event_id>/timesteps/<int:ts_id>/risk-zones", methods=["GET"])
+@token_required
 def get_risk_zones(event_id: int, ts_id: int):
     """Return all 3 horizons combined as one FeatureCollection."""
     result, err = _get_event_and_ts(event_id, ts_id)
@@ -127,6 +134,7 @@ def get_risk_zones(event_id: int, ts_id: int):
 
 
 @timesteps_bp.route("/events/<int:event_id>/timesteps/<int:ts_id>/roads", methods=["GET"])
+@token_required
 def get_roads(event_id: int, ts_id: int):
     """Return roads.geojson — major roads with status (burned/at_risk_Xh/clear)
     and cut_at/cut_location for threatened segments."""
@@ -138,8 +146,9 @@ def get_roads(event_id: int, ts_id: int):
     return jsonify(_read_geojson(path)), 200
 
 
-@timesteps_bp.route("/events/<int:event_id>/timesteps/<int:ts_id>/analysis", methods=["GET"])
-def get_analysis(event_id: int, ts_id: int):
+@timesteps_bp.route("/events/<int:event_id>/timesteps/<int:ts_id>/population", methods=["GET"])
+@token_required
+def get_population(event_id: int, ts_id: int):
     """Return population counts from DB."""
     result, err = _get_event_and_ts(event_id, ts_id)
     if err:
@@ -153,7 +162,71 @@ def get_analysis(event_id: int, ts_id: int):
     }), 200
 
 
+def _weather_dir(event_id: int, year: int, slot_time) -> Path:
+    import pandas as pd
+    ts_str = pd.Timestamp(slot_time).strftime("%Y-%m-%dT%H%M")
+    return _DATA_DIR / "events" / f"{year}_{event_id:04d}" / "timesteps" / ts_str / "weather"
+
+
+@timesteps_bp.route("/events/<int:event_id>/timesteps/<int:ts_id>/weather", methods=["GET"])
+@token_required
+def get_weather(event_id: int, ts_id: int):
+    """Return hourly ERA5 area-average forecast for +12h.
+
+    Response: [{hour, temp_c, rh, wind_speed_kmh, max_wind_speed_kmh, wind_dir}, ...]
+    """
+    result, err = _get_event_and_ts(event_id, ts_id)
+    if err:
+        return err
+    event, ts = result
+    path = _weather_dir(event.id, event.year, ts.slot_time) / "forecast.json"
+    if not path.exists():
+        return jsonify([]), 200
+    return Response(path.read_text(encoding="utf-8"), mimetype="application/json"), 200
+
+
+@timesteps_bp.route("/events/<int:event_id>/timesteps/<int:ts_id>/wind-field", methods=["GET"])
+@token_required
+def get_wind_field(event_id: int, ts_id: int):
+    """Return leaflet-velocity wind field data.
+
+    Query params:
+        hour (int, 0-12): if given, returns [u_obj, v_obj] for that hour only.
+                          if omitted, returns all hours: [{hour, data:[u,v]}, ...]
+
+    Response (no hour param): [{hour: 0, data: [u_obj, v_obj]}, ...]
+    Response (with hour=N):   [u_component_obj, v_component_obj]
+    """
+    result, err = _get_event_and_ts(event_id, ts_id)
+    if err:
+        return err
+    event, ts = result
+    path = _weather_dir(event.id, event.year, ts.slot_time) / "wind_field.json"
+    if not path.exists():
+        return jsonify([]), 200
+
+    hour_param = request.args.get("hour")
+    if hour_param is None:
+        # Return all hours
+        return Response(path.read_text(encoding="utf-8"), mimetype="application/json"), 200
+
+    try:
+        hour = int(hour_param)
+    except (TypeError, ValueError):
+        hour = 0
+
+    all_hours = json.loads(path.read_text(encoding="utf-8"))
+    entry = next((h for h in all_hours if h["hour"] == hour), None)
+    if entry is None and all_hours:
+        entry = all_hours[0]
+    if entry is None:
+        return jsonify([]), 200
+
+    return jsonify(entry["data"]), 200
+
+
 @timesteps_bp.route("/events/<int:event_id>/timesteps/<int:ts_id>/fire-context", methods=["GET"])
+@token_required
 def get_fire_context(event_id: int, ts_id: int):
     """Return fire_context.json (fire metrics, weather, FWI, wind forecast, road summary)."""
     result, err = _get_event_and_ts(event_id, ts_id)
@@ -163,10 +236,13 @@ def get_fire_context(event_id: int, ts_id: int):
     path = _pred_dir(event.id, event.year, ts.slot_time) / "fire_context.json"
     if not path.exists():
         return jsonify({"error": "fire context not yet available"}), 404
-    return Response(path.read_text(encoding="utf-8"), mimetype="application/json"), 200
+    import re
+    text = re.sub(r'\bNaN\b', 'null', path.read_text(encoding="utf-8"))
+    return Response(text, mimetype="application/json"), 200
 
 
 @timesteps_bp.route("/events/<int:event_id>/timesteps/<int:ts_id>/report", methods=["POST"])
+@token_required
 def generate_report(event_id: int, ts_id: int):
     """Generate AI situation report on-demand. Returns cached result if available.
 
@@ -210,11 +286,14 @@ def generate_report(event_id: int, ts_id: int):
             "impact_analysis":     run_impact_agent(fire_context, population),
             "evacuation_analysis": run_evacuation_agent(fire_context),
         }
-        summary["situation_overview"] = run_summary_agent(
+        overview = run_summary_agent(
             summary["risk_analysis"],
             summary["impact_analysis"],
             summary["evacuation_analysis"],
         )
+        summary["situation_overview"] = overview.get("briefing", "")
+        summary["risk_level"]         = overview.get("risk_level", "Unknown")
+        summary["key_points"]         = overview.get("key_points", [])
     except Exception as e:
         return jsonify({"error": f"AI agent failed: {e}"}), 502
 
@@ -224,6 +303,7 @@ def generate_report(event_id: int, ts_id: int):
 
 
 @timesteps_bp.route("/events/<int:event_id>/chat", methods=["POST"])
+@token_required
 def chat(event_id: int):
     """Stateless chat endpoint. Streams response from chat_agent.
 

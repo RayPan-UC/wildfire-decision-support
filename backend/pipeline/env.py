@@ -57,11 +57,20 @@ def _make_study(event):
     study = whp.Study(
         name        = event.name,
         bbox        = (lon_min, lat_min, lon_max, lat_max),
-        start_date  = event.time_start.strftime("%Y-%m-%d"),
+        start_date  = event.start_date.strftime("%Y-%m-%d"),
         end_date    = event.end_date.strftime("%Y-%m-%d"),
         project_dir = project_dir,
     )
     study.makedirs()
+
+    # Remove unused library-generated dirs that we don't use in this system
+    # (models/ and predictions/ are managed by data/static/models/ instead)
+    for unused in (study.models_dir, study.predictions_dir, study.data_render_dir):
+        try:
+            unused.rmdir()   # only removes if empty
+        except OSError:
+            pass
+
     return study
 
 
@@ -73,6 +82,9 @@ def _prepare_event(event) -> None:
 
     print("[env] Fetching landmarks ...")
     _fetch_landmarks(event, study)
+
+    print("[env] Pre-building roads cache ...")
+    _prebuild_roads(event, study)
 
     print("[env] Checking ERA5 ...")
     whp.ensure_era5_coverage(study)
@@ -269,6 +281,45 @@ def _nominatim_places(lat_min, lon_min, lat_max, lon_max) -> list[dict]:
             continue
 
     return results
+
+
+_ROAD_TYPES = {
+    "motorway", "motorway_link", "trunk", "trunk_link",
+    "primary", "primary_link", "secondary", "secondary_link",
+}
+
+
+def _prebuild_roads(event, study) -> None:
+    """Filter roads_canada.gpkg to event bbox once per event.
+
+    Saves data_processed/roads/roads_raw.gpkg with columns:
+      road_name, highway, geometry
+    Skips if the file already exists.
+    """
+    import geopandas as gpd
+    from shapely import wkb
+
+    out_path = study.data_processed_dir / "roads" / "roads_clipped.gpkg"
+    if out_path.exists():
+        print("[env] roads_clipped.gpkg — already exists, skip")
+        return
+
+    roads_src = _DATA_DIR / "static" / "roads_canada.gpkg"
+    if not roads_src.exists():
+        print("[env] WARN: roads_canada.gpkg not found — skipping roads cache")
+        return
+
+    geom = wkb.loads(bytes(event.bbox.data))
+    bbox = geom.bounds  # (lon_min, lat_min, lon_max, lat_max)
+
+    roads = gpd.read_file(roads_src, bbox=bbox)
+    roads = roads[roads["highway"].isin(_ROAD_TYPES)].copy()
+    roads["name"] = roads["name"].fillna("").str.strip()
+    roads["road_name"] = roads["name"].where(roads["name"] != "", roads["highway"])
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    roads[["road_name", "highway", "geometry"]].to_file(out_path, driver="GPKG")
+    print(f"[env] roads_clipped.gpkg — {len(roads)} segments → {out_path}")
 
 
 def _ensure_models() -> None:

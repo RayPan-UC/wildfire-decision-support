@@ -1,0 +1,66 @@
+<!-- ══════════════════════════════════════════════════════════
+     VIEW 2 · EVENT (left panel + full map + bottom dash)
+══════════════════════════════════════════════════════════ -->
+<div id="event-view" class="hidden">
+
+  <div id="event-body">
+
+    <!-- Left panel -->
+    <aside id="left-panel">
+      <div class="lp-header">
+        <div class="lp-event-name" id="lp-event-name">—</div>
+        <div class="lp-event-meta" id="lp-event-meta"></div>
+      </div>
+
+      <div class="lp-section-title">Timestep Replay</div>
+      <div id="timestep-slider-section">
+        <div class="empty-msg">Loading…</div>
+      </div>
+
+      <div class="lp-section-title" id="fcast-section-title" style="display:none">Forecast Horizon</div>
+      <div id="fcast-section" style="display:none">
+        <div class="fcast-wrap">
+          <div class="fcast-top-row">
+            <span id="fcast-badge" class="fcast-badge now">NOW</span>
+            <span id="fcast-h-label" class="fcast-h-label">+0h</span>
+          </div>
+          <input type="range" id="fcast-slider" min="0" max="12" value="0" step="1">
+          <div class="fcast-tick-row">
+            <span>0</span><span>+3h</span><span>+6h</span><span>+12h</span>
+          </div>
+          <div id="fcast-weather" class="fcast-weather">
+            <span style="opacity:.4;font-size:10px">Loading…</span>
+          </div>
+        </div>
+      </div>
+
+    </aside>
+
+    <!-- Map (full remaining width) -->
+    <div id="event-map-wrap">
+      <div id="event-map"></div>
+      <!-- Floating legend (top-left of map) -->
+      <div id="event-legend">
+        <div class="leg-row"><span class="leg-swatch" style="background:#cc2200;opacity:.7"></span>Fire perimeter</div>
+        <div class="leg-row"><span class="leg-swatch" style="background:#ff2222;opacity:.7"></span>High risk zone</div>
+        <div class="leg-row"><span class="leg-line" style="background:#cc0000"></span>Burned road</div>
+        <div class="leg-row"><span class="leg-line" style="background:#ff8c00"></span>At-risk road</div>
+        <div class="leg-row"><span class="leg-line" style="background:#44dd44"></span>Clear road</div>
+      </div>
+    </div>
+
+  </div><!-- /event-body -->
+
+  <!-- Bottom dashboard -->
+  <div id="bottom-panel">
+    <div id="bottom-header">
+      <span class="bottom-title">Situation Dashboard</span>
+      <div class="bottom-spacer"></div>
+      <button id="report-btn" class="report-btn" disabled><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:5px"><rect x="3" y="8" width="18" height="13" rx="2"/><path d="M12 8V4"/><circle cx="12" cy="4" r="1" fill="currentColor"/><circle cx="9" cy="15" r="1.5" fill="currentColor" stroke="none"/><circle cx="15" cy="15" r="1.5" fill="currentColor" stroke="none"/></svg>AI Analysis</button>
+    </div>
+    <div id="dashboard-content">
+      <div class="dash-empty">Select a timestep to view data</div>
+    </div>
+  </div>
+
+</div><!-- /event-view -->

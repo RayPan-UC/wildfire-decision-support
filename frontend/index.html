@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Wildfire Decision Support</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/leaflet-velocity@2.1.2/dist/leaflet-velocity.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet-velocity@2.1.2/dist/leaflet-velocity.css"/>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="dark">
+
+<!-- ══════════════════════════════════════════════════════════
+     HEADER
+══════════════════════════════════════════════════════════ -->
+<header id="header">
+  <div id="nav-home-btn" class="logo-btn">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:middle;flex-shrink:0"><path d="M13.5.67s.74 2.65.74 4.8c0 2.06-1.35 3.73-3.41 3.73-2.07 0-3.63-1.67-3.63-3.73l.03-.36C5.21 7.51 4 10.62 4 14c0 4.42 3.58 8 8 8s8-3.58 8-8C20 8.61 17.41 3.8 13.5.67zM11.71 19c-1.78 0-3.22-1.4-3.22-3.14 0-1.62 1.05-2.76 2.81-3.12 1.77-.36 3.6-1.21 4.62-2.58.39 1.29.59 2.65.59 4.04 0 2.65-2.15 4.8-4.8 4.8z"/></svg>
+    <span class="logo-text">Wildfire Decision Support</span>
+  </div>
+  <div id="breadcrumb" class="breadcrumb hidden"></div>
+  <div class="header-spacer"></div>
+  <span id="auth-user-label"></span>
+  <button class="header-btn" id="auth-login-btn">Sign In</button>
+  <button class="header-btn hidden" id="auth-logout-btn">Sign Out</button>
+  <button class="header-btn" id="theme-toggle" aria-label="Toggle theme"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg></button>
+</header>
+
+<!-- ══════════════════════════════════════════════════════════
+     VIEW 1 · HOME MAP (FIRMS + events)
+══════════════════════════════════════════════════════════ -->
+<div id="home-view">
+  <div id="home-map"></div>
+
+  <div class="map-overlay" id="home-legend">
+    <div class="legend-title">NASA FIRMS · 5-day</div>
+    <div class="legend-row"><span class="dot" style="background:#ff2200"></span> Active fire</div>
+    <div class="legend-row"><span class="dot" style="background:transparent;border:2px dashed #ff6b35"></span> Fire event</div>
+    <div class="legend-hint">Click an event to open</div>
+  </div>
+
+  <div class="home-sidebar">
+    <div class="hs-title">Fire Events</div>
+    <div id="home-event-list"><div class="empty-msg">Loading…</div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     VIEW 2 · EVENT (left panel + full map + bottom dash)
+══════════════════════════════════════════════════════════ -->
+<div id="event-view" class="hidden">
+
+  <div id="event-body">
+
+    <!-- Left panel -->
+    <aside id="left-panel">
+      <div class="lp-header">
+        <div class="lp-event-name" id="lp-event-name">—</div>
+        <div class="lp-event-meta" id="lp-event-meta"></div>
+      </div>
+
+      <div class="lp-section-title">Timestep Replay</div>
+      <div id="timestep-slider-section">
+        <div class="empty-msg">Loading…</div>
+      </div>
+
+      <div class="lp-section-title" id="fcast-section-title" style="display:none">Forecast Horizon</div>
+      <div id="fcast-section" style="display:none">
+        <div class="fcast-wrap">
+          <div class="fcast-top-row">
+            <span id="fcast-badge" class="fcast-badge now">NOW</span>
+            <span id="fcast-h-label" class="fcast-h-label">+0h</span>
+          </div>
+          <input type="range" id="fcast-slider" min="0" max="12" value="0" step="1">
+          <div class="fcast-tick-row">
+            <span>0</span><span>+3h</span><span>+6h</span><span>+12h</span>
+          </div>
+          <div id="fcast-weather" class="fcast-weather">
+            <span style="opacity:.4;font-size:10px">Loading…</span>
+          </div>
+        </div>
+      </div>
+
+    </aside>
+
+    <!-- Map (full remaining width) -->
+    <div id="event-map-wrap">
+      <div id="event-map"></div>
+      <div id="event-legend">
+        <div class="leg-row"><span class="leg-swatch" style="background:#cc2200;opacity:.7"></span>Fire perimeter</div>
+        <div class="leg-row"><span class="leg-swatch" style="background:#ff2222;opacity:.7"></span>High risk zone</div>
+        <div class="leg-row"><span class="leg-line" style="background:#cc0000"></span>Burned road</div>
+        <div class="leg-row"><span class="leg-line" style="background:#ff8c00"></span>At-risk road</div>
+        <div class="leg-row"><span class="leg-line" style="background:#44dd44"></span>Clear road</div>
+      </div>
+    </div>
+
+  </div><!-- /event-body -->
+
+  <!-- Bottom dashboard -->
+  <div id="bottom-panel">
+    <div id="bottom-header">
+      <span class="bottom-title">Situation Dashboard</span>
+    </div>
+    <div id="dashboard-content">
+      <div class="dash-empty">Select a timestep to view data</div>
+    </div>
+  </div>
+
+</div><!-- /event-view -->
+
+<!-- ══════════════════════════════════════════════════════════
+     AI COPILOT MODAL
+══════════════════════════════════════════════════════════ -->
+<div id="ai-modal-overlay" class="modal-overlay">
+  <div id="ai-modal">
+
+    <!-- Modal header -->
+    <div class="ai-modal-header">
+      <span class="ai-modal-title"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:middle;margin-right:6px"><path d="M13.5.67s.74 2.65.74 4.8c0 2.06-1.35 3.73-3.41 3.73-2.07 0-3.63-1.67-3.63-3.73l.03-.36C5.21 7.51 4 10.62 4 14c0 4.42 3.58 8 8 8s8-3.58 8-8C20 8.61 17.41 3.8 13.5.67zM11.71 19c-1.78 0-3.22-1.4-3.22-3.14 0-1.62 1.05-2.76 2.81-3.12 1.77-.36 3.6-1.21 4.62-2.58.39 1.29.59 2.65.59 4.04 0 2.65-2.15 4.8-4.8 4.8z"/></svg>Situational Awareness Report</span>
+      <span id="ai-modal-badge" class="ai-badge"></span>
+      <div class="header-spacer"></div>
+      <button id="ai-modal-close" class="modal-close-btn">✕</button>
+    </div>
+
+    <!-- Modal body: report (left) + chat (right) -->
+    <div class="ai-modal-body">
+
+      <!-- Left: report -->
+      <div id="ai-report-col">
+        <div id="ai-report-loading" class="report-loading-state">
+          <div class="spinner"></div>
+          <div>
+            <div style="font-weight:600;margin-bottom:4px">Generating AI analysis…</div>
+            <div style="font-size:11px;opacity:.6">This may take 15–30 seconds</div>
+          </div>
+        </div>
+        <div id="ai-report-ready" class="hidden">
+          <div class="report-tabs" id="ai-report-tabs"></div>
+          <div id="ai-report-panels"></div>
+        </div>
+      </div>
+
+      <!-- Divider -->
+      <div class="ai-col-divider"></div>
+
+      <!-- Right: chat -->
+      <div id="ai-chat-col">
+        <div class="chat-col-title">Chat</div>
+        <div id="chat-messages">
+          <div class="chat-welcome">Ask anything about this fire event and the AI analysis above.</div>
+        </div>
+        <div class="chat-input-row">
+          <textarea id="chat-input" rows="2" placeholder="Ask about evacuation routes, population at risk…"></textarea>
+          <button id="chat-send-btn">▶</button>
+        </div>
+      </div>
+
+    </div><!-- /ai-modal-body -->
+  </div><!-- /ai-modal -->
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     AUTH MODAL
+══════════════════════════════════════════════════════════ -->
+<div id="auth-modal-overlay" class="modal-overlay">
+  <div id="auth-modal">
+    <div class="auth-modal-header">
+      <span id="auth-modal-title">Sign In</span>
+      <button id="auth-modal-close">✕</button>
+    </div>
+    <form id="auth-form">
+      <input type="text"     id="auth-username" placeholder="Username" autocomplete="username" required>
+      <input type="password" id="auth-password" placeholder="Password" autocomplete="current-password" required>
+      <div id="auth-error"></div>
+      <button type="submit"  id="auth-submit-btn">Login</button>
+      <button type="button"  id="auth-toggle-mode">Don't have an account? Register</button>
+    </form>
+  </div>
+</div>
+
+<script src="js/api.js"></script>
+<script src="js/map.js"></script>
+<script src="js/dashboard.js"></script>
+<script src="js/chat.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>

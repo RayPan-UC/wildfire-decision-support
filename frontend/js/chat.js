@@ -70,6 +70,9 @@
     document.getElementById('chat-input').addEventListener('keydown', function(e) {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); _send(); }
     });
+    document.getElementById('ai-enhance-crowd-btn')?.addEventListener('click', function() {
+      if (!this.disabled) _startGenerateWithCrowd();
+    });
 
     // Inject limit message element (shown when non-admin hits CHAT_LIMIT)
     const chatCol = document.getElementById('ai-chat-col');
@@ -90,6 +93,17 @@
   function setAdmin(v) {
     _isAdmin = !!v;
     _applyChatLock();
+  }
+
+  function setCrowdAvailable(available) {
+    const btn = document.getElementById('ai-enhance-crowd-btn');
+    if (!btn) return;
+    btn.disabled = !available || !_isAdmin;
+    btn.title = !_isAdmin
+      ? 'Admin access required'
+      : available
+        ? 'Re-run AI report using latest crowd field reports'
+        : 'Requires crowd prediction to be run first';
   }
 
   function _applyChatLock() {
@@ -165,10 +179,7 @@
       body.className = 'ai-card-body done';
       body.innerHTML =
         '<div class="ai-card-ready">Report ready</div>' +
-        '<div class="ai-card-view">Click to view →</div>' +
-        (_isAdmin ? '<button id="ai-crowd-btn" class="ai-crowd-btn" title="Re-run with latest crowd reports">↺ Update with user reports</button>' : '');
-      const crowdBtn = document.getElementById('ai-crowd-btn');
-      if (crowdBtn) crowdBtn.addEventListener('click', _startGenerateWithCrowd);
+        '<div class="ai-card-view">Click to view →</div>';
     } else if (_cardState === 'crowd-loading') {
       body.className = 'ai-card-body loading';
       body.innerHTML = '<div class="spinner-sm"></div><div class="ai-card-status">Updating with crowd data…</div>';
@@ -215,6 +226,8 @@
     if (!_eid || !_tsid) return;
     _cardState = 'crowd-loading';
     _updateCard();
+    const enhBtn = document.getElementById('ai-enhance-crowd-btn');
+    if (enhBtn) { enhBtn.disabled = true; enhBtn.textContent = '⏳ Enhancing…'; }
     const myGenId = ++_genId;
     try {
       const report = await window.API.generateReportWithCrowd(_eid, _tsid);
@@ -224,12 +237,16 @@
       _cardState = 'done';
       _updateCard();
       _showAIToast();
+      const enhBtn2 = document.getElementById('ai-enhance-crowd-btn');
+      if (enhBtn2) { enhBtn2.disabled = false; enhBtn2.textContent = '⚡ Enhance with Crowd Data'; }
       // Open modal immediately to show updated report
       open();
     } catch(e) {
       if (myGenId !== _genId) return;
       _cardState = 'done';
       _updateCard();
+      const enhBtn2 = document.getElementById('ai-enhance-crowd-btn');
+      if (enhBtn2) { enhBtn2.disabled = false; enhBtn2.textContent = '⚡ Enhance with Crowd Data'; }
       const t = document.createElement('div');
       t.className = 'toast error';
       t.textContent = 'Crowd update failed: ' + _escHtml(e.message);
@@ -732,5 +749,5 @@
     );
   }
 
-  window.AIModal = { init, setContext, setAdmin, open, close, renderCard };
+  window.AIModal = { init, setContext, setAdmin, setCrowdAvailable, open, close, renderCard };
 })();

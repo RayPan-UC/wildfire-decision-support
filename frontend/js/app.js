@@ -440,8 +440,9 @@
           clearInterval(_pollCrowdIntervals[key]);
           delete _pollCrowdIntervals[key];
           _hidePredStatus();
-          // Enable the ML + Crowd radio and auto-select it
+          // Enable the ML + Crowd radio and enhance button
           _setCrowdRadio(true);
+          window.AIModal?.setCrowdAvailable(true);
           var crowdRadio = document.getElementById('pred-type-crowd');
           if (crowdRadio) {
             crowdRadio.checked = true;
@@ -517,6 +518,7 @@
     window.API.getTsStatus(eid, tsid).then(function(s) {
       var crowdReady = s.crowd_prediction_status === 'done' && s.spatial_crowd_status === 'done';
       _setCrowdRadio(crowdReady);
+      window.AIModal?.setCrowdAvailable(crowdReady);
       // If we're in crowd mode but crowd isn't ready for this timestep, fall back to ML
       if (predictionType === 'crowd' && !crowdReady) {
         predictionType = 'ml';
@@ -525,7 +527,10 @@
         if (mlRadio) mlRadio.checked = true;
         _updateRiskLegend();
       }
-    }).catch(function() { _setCrowdRadio(false); });
+    }).catch(function() {
+      _setCrowdRadio(false);
+      window.AIModal?.setCrowdAvailable(false);
+    });
 
     // Sentinel-2: find nearest scene, then update tile URL with actual acquired date
     const satEl = document.getElementById('ts-sat-label');

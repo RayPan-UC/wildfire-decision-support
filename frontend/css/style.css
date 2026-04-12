@@ -446,6 +446,15 @@ body.light #prediction-status-bar { background: rgba(255,255,255,.93); }
 .ai-badge { font-size: 11px; color: var(--text2); background: var(--surface2); padding: 2px 7px; border-radius: 10px; border: 1px solid var(--border); }
 .modal-close-btn { background: none; border: none; cursor: pointer; color: var(--text2); font-size: 18px; line-height: 1; padding: 2px 4px; border-radius: 4px; }
 .modal-close-btn:hover { color: var(--danger); background: rgba(248,81,73,.1); }
+.ai-enhance-btn {
+  padding: 4px 10px; font-size: 11px; font-weight: 600; letter-spacing: .03em;
+  border-radius: 5px; border: 1px solid rgba(156,39,176,.5);
+  background: rgba(156,39,176,.12); color: #ce93d8;
+  cursor: pointer; transition: background .15s, border-color .15s;
+  white-space: nowrap;
+}
+.ai-enhance-btn:hover:not(:disabled) { background: rgba(156,39,176,.25); border-color: #9c27b0; color: #e1bee7; }
+.ai-enhance-btn:disabled { opacity: .35; cursor: not-allowed; }
 
 /* AI modal body = report col + divider + chat col */
 .ai-modal-body {

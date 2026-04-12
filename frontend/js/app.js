@@ -11,6 +11,15 @@
   let currentEvent = null;
   let currentWeather = [];   // [{hour, temp_c, rh, wind_speed_kmh, wind_dir}]
 
+  let predictionType      = 'ml';   // 'ml' | 'wind'
+  let _timestepsDone      = [];     // full list of done timesteps for current event
+  let _currentTsIndex     = -1;     // index of currently selected timestep in _timestepsDone
+  let _replayVirtualTime  = 0;      // current virtual clock ms (shared with DEV controls)
+  let _replayIdx          = -1;     // which done[] entry the clock is currently on
+  let _replaySpeed        = 1;      // clock multiplier: 1 or 60
+  let _isAdmin            = false;  // set after login/verify
+  let _syncPushInterval   = null;   // admin: pushes virtual time to server every 10s
+
   // ── Boot ─────────────────────────────────────────────────────────────────────
 
   document.addEventListener('DOMContentLoaded', async function() {
@@ -27,16 +36,52 @@
       }
     });
 
+    // Dashboard horizontal scroll via mouse wheel
+    var dashEl = document.getElementById('dashboard-content');
+    if (dashEl) {
+      dashEl.addEventListener('wheel', function(e) {
+        if (e.deltaY !== 0) {
+          e.preventDefault();
+          dashEl.scrollLeft += e.deltaY;
+        }
+      }, { passive: false });
+    }
+
     window.AIModal.init();
     window.Dashboard.clearDashboard();
+    if (window.CrowdPanel) window.CrowdPanel.init();
 
-    document.getElementById('nav-home-btn').addEventListener('click', goHome);
+    document.getElementById('nav-home-btn')?.addEventListener('click', function() { goHome(); });
+
+    document.getElementById('dash-collapse-btn')?.addEventListener('click', function() {
+      document.getElementById('bottom-panel')?.classList.toggle('collapsed');
+    });
+
+    initPredType();
+    initDevWindow();
 
     allEvents = await loadEvents();
     window.API.getRealtimeFirms().then(function(fc) {
       homeMap.renderFirms(fc);
     }).catch(function() {});
-    showView('home');
+
+    // Deep-link: /demo?event_id=<id>
+    var _urlParams = new URLSearchParams(window.location.search);
+    var _urlEventId = _urlParams.get('event_id');
+    if (_urlEventId) {
+      var _deepEvent = allEvents.find(function(e) { return String(e.id) === _urlEventId; });
+      if (_deepEvent) { openEvent(_deepEvent); } else { showView('home'); }
+    } else {
+      showView('home');
+    }
+
+    window.addEventListener('popstate', function(e) {
+      if (e.state && e.state.eventId) {
+        var ev = allEvents.find(function(e2) { return e2.id === e.state.eventId; });
+        if (ev) { openEvent(ev, true); return; }
+      }
+      goHome(true);
+    });
   });
 
   // ── Views ─────────────────────────────────────────────────────────────────────
@@ -52,11 +97,14 @@
     }, 60);
   }
 
-  function goHome() {
+  function goHome(fromPopstate) {
     currentEvent = null;
+    if (_syncPushInterval) { clearInterval(_syncPushInterval); _syncPushInterval = null; }
     window.Dashboard.clearDashboard();
     window.AIModal.setContext(null, null);
     window.AIModal.close();
+    if (window.CrowdPanel) window.CrowdPanel.clearEvent();
+    if (!fromPopstate) history.pushState({}, '', '/demo');
     showView('home');
   }
 
@@ -92,15 +140,26 @@
     });
   }
 
-  async function openEvent(ev) {
+  function _showEventLoading(label) {
+    var ov = document.getElementById('event-loading-overlay');
+    var lb = document.getElementById('event-loading-label');
+    if (lb) lb.textContent = label || 'Loading event…';
+    if (ov) ov.classList.remove('hidden');
+  }
+
+  function _hideEventLoading() {
+    var ov = document.getElementById('event-loading-overlay');
+    if (ov) ov.classList.add('hidden');
+  }
+
+  async function openEvent(ev, fromPopstate) {
     currentEvent = ev;
+    if (!fromPopstate) history.pushState({ eventId: ev.id }, '', '/demo?event_id=' + ev.id);
 
     document.getElementById('breadcrumb').textContent = ev.name + ' · ' + ev.year;
-    document.getElementById('lp-event-name').textContent = ev.name;
-    document.getElementById('lp-event-meta').textContent =
-      ev.year + ' · ' + fmtDate(ev.start_date) + ' – ' + fmtDate(ev.end_date);
 
     eventMap.clearLayers();
+    if (window.CrowdPanel) window.CrowdPanel.setEvent(ev.id, eventMap);
     showView('event', function() {
       if (ev.bbox) eventMap.fitToBbox(ev.bbox);
       window.API.getAoi(ev.id).then(function(aoi) {
@@ -110,7 +169,29 @@
     window.Dashboard.clearDashboard();
     window.AIModal.setContext(ev.id, null);
 
-    await loadTimesteps(ev.id);
+    _showEventLoading('Loading ' + ev.name + '…');
+    try {
+      await loadTimesteps(ev.id);
+    } finally {
+      _hideEventLoading();
+    }
+
+    // Sync replay clock with server
+    // Both admin and non-admin pull once on load to restore saved position.
+    window.API.getReplayTime(ev.id).then(function(d) {
+      if (d.ms && _timestepsDone.length) {
+        _replayVirtualTime = d.ms;
+        _devApplyReplayTime();
+      }
+    }).catch(function(){});
+
+    if (_isAdmin) {
+      // Admin: also push virtual time to server every 10s as clock advances
+      if (_syncPushInterval) clearInterval(_syncPushInterval);
+      _syncPushInterval = setInterval(function() {
+        if (currentEvent) window.API.setReplayTime(currentEvent.id, _replayVirtualTime).catch(function(){});
+      }, 10000);
+    }
   }
 
   // ── Timesteps ─────────────────────────────────────────────────────────────────
@@ -127,25 +208,28 @@
       return;
     }
 
-    const done = timesteps.filter(function(ts) { return ts.prediction_status === 'done'; });
+    // Use all slots (pending ones trigger on-demand build when selected)
+    const done = timesteps;
+    _timestepsDone  = done;
+    _currentTsIndex = 0;
     if (!done.length) {
-      container.innerHTML = '<div class="empty-msg">No completed timesteps yet</div>';
+      container.innerHTML = '<div class="empty-msg">No timesteps yet</div>';
       return;
     }
 
     const tickBar = done.map(function(ts) {
-      let cls = ts.spatial_analysis_status === 'done' ? 'full' : 'partial';
+      let cls = ts.prediction_status !== 'done' ? 'pending'
+              : ts.spatial_analysis_status === 'done' ? 'full' : 'partial';
       if (ts.data_gap_warn) cls += ' gap';
       return '<div class="ts-tick ' + cls + '" title="' + fmtDateTime(ts.slot_time) + '"></div>';
     }).join('');
 
     container.innerHTML =
       '<div class="ts-slider-wrap">' +
-        '<div class="ts-status-bar">' + tickBar + '</div>' +
-        '<input type="range" id="ts-slider" min="0" max="' + (done.length - 1) + '" value="0" step="1">' +
+        '<div class="ts-status-bar" id="ts-tick-bar">' + tickBar + '</div>' +
         '<div class="ts-label-row">' +
           '<span id="ts-label">' + fmtDateTime(done[0].slot_time) + '</span>' +
-          '<span id="ts-gap-badge" class="ts-gap"></span>' +
+          '<span id="ts-live-badge" class="ts-live-badge">● LIVE</span>' +
         '</div>' +
         '<div class="ts-meta-row">' +
           '<div class="ts-meta-item">' +
@@ -156,32 +240,72 @@
             '<span class="ts-meta-lbl">Sentinel-2</span>' +
             '<span class="ts-meta-val" id="ts-sat-label">—</span>' +
           '</div>' +
+          '<div class="ts-meta-item">' +
+            '<span class="ts-meta-lbl">Data gap</span>' +
+            '<span id="ts-gap-badge" class="ts-gap"></span>' +
+          '</div>' +
         '</div>' +
       '</div>';
 
     setGapBadge(done[0]);
+    _highlightTick(0);
 
-    var slider = document.getElementById('ts-slider');
-    var _tsDebounce = null;
-    slider.addEventListener('input', function() {
-      const ts = done[+slider.value];
-      document.getElementById('ts-label').textContent = fmtDateTime(ts.slot_time);
-      setGapBadge(ts);
-      clearTimeout(_tsDebounce);
-      _tsDebounce = setTimeout(function() { selectTimestep(ts); }, 200);
-    });
+    // ── Virtual real-time clock ───────────────────────────────────────────────
+    // Uses module-level _replayVirtualTime, _replayIdx, _replaySpeed so DEV
+    // controls can jump/speed the clock without touching each other's state.
+    _replayVirtualTime = new Date(done[0].slot_time).getTime();
+    _replayIdx = 0;
+    var _replayInterval = null;
+
+    function stopPlay() {
+      clearInterval(_replayInterval);
+      _replayInterval = null;
+      var badge = document.getElementById('ts-live-badge');
+      if (badge) badge.style.display = 'none';
+    }
+
+    function startPlay() {
+      var badge = document.getElementById('ts-live-badge');
+      if (badge) badge.style.display = '';
+      _replayInterval = setInterval(function() {
+        _replayVirtualTime += 1000 * _replaySpeed;
+        var label = document.getElementById('ts-label');
+        if (label) label.textContent = fmtDateTime(new Date(_replayVirtualTime).toISOString());
+
+        var nextIdx = _replayIdx + 1;
+        if (nextIdx < done.length) {
+          var nextBoundary = new Date(done[nextIdx].slot_time).getTime();
+          if (_replayVirtualTime >= nextBoundary) {
+            _replayIdx = nextIdx;
+            _currentTsIndex = nextIdx;
+            setGapBadge(done[nextIdx]);
+            selectTimestep(done[nextIdx]);
+            _highlightTick(nextIdx);
+          }
+        } else {
+          stopPlay();
+        }
+      }, 1000);
+    }
 
     selectTimestep(done[0]);
+    startPlay();
+  }
+
+  function _highlightTick(idx) {
+    var ticks = document.querySelectorAll('#ts-tick-bar .ts-tick');
+    ticks.forEach(function(t, i) { t.classList.toggle('active', i === idx); });
   }
 
   function setGapBadge(ts) {
     const el = document.getElementById('ts-gap-badge');
     if (el) {
+      const hrs = ts.gap_hours != null ? ts.gap_hours.toFixed(1) : '?';
       if (ts.data_gap_warn) {
-        el.textContent = '⚠ Gap ' + (ts.gap_hours != null ? ts.gap_hours.toFixed(1) : '?') + 'h';
+        el.textContent = hrs + 'h ago ⚠';
         el.className   = 'ts-gap warn';
       } else {
-        el.textContent = '±' + (ts.gap_hours != null ? ts.gap_hours.toFixed(1) : '?') + 'h';
+        el.textContent = hrs + 'h ago';
         el.className   = 'ts-gap ok';
       }
     }
@@ -242,12 +366,24 @@
       }
     }
 
-    // Risk zone visibility
+    // Risk zone visibility — gated by prediction type
     if (eventMap) {
-      eventMap.setRiskVisible('3h',  h >= 3  && h <= 5);
-      eventMap.setRiskVisible('6h',  h >= 6  && h <= 11);
-      eventMap.setRiskVisible('12h', h >= 12);
+      const useML   = predictionType === 'ml';
+      const useWind = predictionType === 'wind';
+      eventMap.setRiskVisible('3h',      useML   && h >= 3  && h <= 5);
+      eventMap.setRiskVisible('6h',      useML   && h >= 6  && h <= 11);
+      eventMap.setRiskVisible('12h',     useML   && h >= 12);
+      eventMap.setWindRiskVisible('3h',  useWind && h >= 3  && h <= 5);
+      eventMap.setWindRiskVisible('6h',  useWind && h >= 6  && h <= 11);
+      eventMap.setWindRiskVisible('12h', useWind && h >= 12);
       eventMap.setWeatherGridHour(h);
+      var actualOn = document.getElementById('dev-actual-toggle')?.checked;
+      if (actualOn) {
+        eventMap.setActualPerimVisible('+0h',  h <= 2);
+        eventMap.setActualPerimVisible('+3h',  h >= 3  && h <= 5);
+        eventMap.setActualPerimVisible('+6h',  h >= 6  && h <= 11);
+        eventMap.setActualPerimVisible('+12h', h >= 12);
+      }
     }
 
     // Weather mini panel
@@ -279,13 +415,109 @@
     currentWeather = [];
   }
 
+  // Poll a timestep until prediction_status === 'done', then reload layers.
+  function _updateSimBtnState() {
+    var simBtn = document.getElementById('dev-sim-btn');
+    if (!simBtn) return;
+    var ts = (_currentTsIndex >= 0 && _timestepsDone.length) ? _timestepsDone[_currentTsIndex] : null;
+    var isDone = ts && ts.prediction_status === 'done';
+    simBtn.disabled = !isDone;
+    simBtn.title = isDone ? '' : 'Prediction must complete before simulating reports';
+  }
+
+  var _pollIntervals = {};
+  var _pollCrowdIntervals = {};
+  var _crowdMode = false;
+
+  function _pollCrowdUntilDone(ts) {
+    var key = 'crowd_' + ts.id;
+    if (_pollCrowdIntervals[key]) return;
+    _pollCrowdIntervals[key] = setInterval(async function() {
+      try {
+        var s = await window.API.getTsStatus(currentEvent.id, ts.id);
+        var crowdDone = s.crowd_prediction_status === 'done' && s.spatial_crowd_status === 'done';
+        if (crowdDone) {
+          clearInterval(_pollCrowdIntervals[key]);
+          delete _pollCrowdIntervals[key];
+          _crowdMode = true;
+          _hidePredStatus();
+          // Reload perimeter + hotspots + risk zones from crowd endpoints
+          var eid  = currentEvent.id;
+          var tsid = ts.id;
+          Promise.allSettled([
+            window.API.getPerimeter(eid, tsid, true),
+            window.API.getHotspots(eid, tsid, true),
+            window.API.getRiskZones(eid, tsid, true),
+          ]).then(function(r) {
+            if (r[0].status === 'fulfilled') eventMap.renderPerimeter(r[0].value);
+            if (r[1].status === 'fulfilled') eventMap.renderHotspots(r[1].value);
+            if (r[2].status === 'fulfilled') eventMap.renderRiskZones(r[2].value);
+          });
+        }
+      } catch(e) {}
+    }, 2000);
+  }
+
+  function _pollUntilDone(ts) {
+    if (_pollIntervals[ts.id]) return;   // already polling
+    _pollIntervals[ts.id] = setInterval(async function() {
+      try {
+        var s = await window.API.getTsStatus(currentEvent.id, ts.id);
+        var idx = _timestepsDone.findIndex(function(t) { return t.id === ts.id; });
+
+        // Keep status bar visible while any stage is still running
+        if (_currentTsIndex === idx && (s.prediction_status !== 'done' || s.spatial_analysis_status !== 'done')) {
+          _showPredStatus();
+        }
+
+        var allDone = s.prediction_status === 'done' && s.spatial_analysis_status === 'done';
+        if (allDone) {
+          clearInterval(_pollIntervals[ts.id]);
+          delete _pollIntervals[ts.id];
+          if (idx >= 0) {
+            _timestepsDone[idx].prediction_status       = s.prediction_status;
+            _timestepsDone[idx].spatial_analysis_status = s.spatial_analysis_status;
+            var tick = document.querySelectorAll('#ts-tick-bar .ts-tick')[idx];
+            if (tick) tick.className = 'ts-tick full';
+            _updateSimBtnState();
+            if (_currentTsIndex === idx) {
+              _hidePredStatus();
+              _crowdMode = false;  // standard prediction completed — revert to normal layers
+              selectTimestep(_timestepsDone[idx]);
+            }
+          }
+        }
+      } catch(e) {}
+    }, 2000);
+  }
+
   async function selectTimestep(ts) {
     if (!currentEvent) return;
     const eid  = currentEvent.id;
     const tsid = ts.id;
 
+    _updateSimBtnState();
     eventMap.clearLayers();
     _hideForecastSlider();
+
+    // Cancel all stale polls (only the current timestep matters)
+    Object.keys(_pollIntervals).forEach(function(id) {
+      if (+id !== tsid) {
+        clearInterval(_pollIntervals[id]);
+        delete _pollIntervals[id];
+      }
+    });
+
+    // Show status bar and trigger/poll if not fully done
+    if (ts.prediction_status !== 'done' || ts.spatial_analysis_status !== 'done') {
+      _showPredStatus();
+      if (ts.prediction_status === 'pending') {
+        window.API.runPredictionStep(eid, tsid).catch(function() {});
+      }
+      _pollUntilDone(ts);
+    } else {
+      _hidePredStatus();
+    }
 
     // Sentinel-2: find nearest scene, then update tile URL with actual acquired date
     const satEl = document.getElementById('ts-sat-label');
@@ -305,18 +537,31 @@
     // Update AI context (does NOT open modal or load report yet)
     window.AIModal.setContext(eid, tsid);
 
+    // Update crowd panel to show only reports up to this timestep's slot time
+    if (window.CrowdPanel && ts.slot_time) {
+      window.CrowdPanel.refresh(ts.slot_time);
+    }
+
     // Map layers (non-blocking)
     Promise.allSettled([
-      window.API.getPerimeter(eid, tsid),
-      window.API.getHotspots(eid, tsid),
-      window.API.getRiskZones(eid, tsid),
+      window.API.getPerimeter(eid, tsid, _crowdMode),
+      window.API.getHotspots(eid, tsid, _crowdMode),
+      window.API.getRiskZones(eid, tsid, _crowdMode),
       window.API.getRoads(eid, tsid),
+      window.API.getWindRiskZones(eid, tsid),
     ]).then(function(r) {
       if (r[0].status === 'fulfilled') eventMap.renderPerimeter(r[0].value);
       if (r[1].status === 'fulfilled') eventMap.renderHotspots(r[1].value);
       if (r[2].status === 'fulfilled') eventMap.renderRiskZones(r[2].value);
       if (r[3].status === 'fulfilled') eventMap.renderRoads(r[3].value);
+      if (r[4].status === 'fulfilled') eventMap.renderRiskZonesWind(r[4].value);
     });
+
+    // If actual perimeter overlay is active, reload it for the new timestep
+    var actualToggle = document.getElementById('dev-actual-toggle');
+    if (actualToggle && actualToggle.checked) {
+      _loadActualPerimeter(ts);
+    }
 
     // Dashboard (non-blocking)
     Promise.allSettled([
@@ -382,7 +627,7 @@
     const token = localStorage.getItem('wf_token');
     if (token) {
       window.API.verifyToken()
-        .then(function(d) { updateAuthUI(d.username); })
+        .then(function(d) { updateAuthUI(d.username, d.is_admin); })
         .catch(function() { updateAuthUI(null); showAuthModal(false); });
     } else {
       showAuthModal(false);
@@ -406,7 +651,7 @@
     try {
       if (authIsLogin) {
         const d = await window.API.login(username, password);
-        updateAuthUI(d.username);
+        updateAuthUI(d.username, d.is_admin);
       } else {
         await window.API.register(username, password);
         await window.API.login(username, password);
@@ -415,23 +660,30 @@
       closeAuthModal();
       // Reload events with new token (firms hotspots also need auth)
       allEvents = await loadEvents();
+      // If an event was already open, reload its timesteps now that we have a token
+      if (currentEvent) await loadTimesteps(currentEvent.id);
     } catch(err) {
       errEl.textContent = err.message;
     }
   }
 
-  function updateAuthUI(username) {
+  function updateAuthUI(username, isAdmin) {
     const loginBtn  = document.getElementById('auth-login-btn');
     const logoutBtn = document.getElementById('auth-logout-btn');
     const userLabel = document.getElementById('auth-user-label');
+    const devBtn    = document.getElementById('dev-toggle-btn');
     if (username) {
+      _isAdmin = !!isAdmin;
       loginBtn?.classList.add('hidden');
       logoutBtn?.classList.remove('hidden');
       if (userLabel) userLabel.textContent = username;
+      if (devBtn) devBtn.style.display = _isAdmin ? '' : 'none';
     } else {
+      _isAdmin = false;
       loginBtn?.classList.remove('hidden');
       logoutBtn?.classList.add('hidden');
       if (userLabel) userLabel.textContent = '';
+      if (devBtn) devBtn.style.display = 'none';
     }
   }
 
@@ -439,16 +691,11 @@
 
   function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
-  function fmtDate(iso) {
-    if (!iso) return '—';
-    return new Date(iso).toLocaleDateString('en-CA');
-  }
-
   function fmtDateTime(iso) {
     if (!iso) return '—';
     const d = new Date(iso);
     return d.toLocaleDateString('en-CA') + ' ' +
-           d.toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit' });
+           d.toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
   }
 
   function showToast(msg, type) {
@@ -458,4 +705,313 @@
     document.body.appendChild(t);
     setTimeout(function() { t.remove(); }, 4000);
   }
+
+  // ── Prediction Type ───────────────────────────────────────────────────────────
+
+  function initPredType() {
+    document.addEventListener('change', function(e) {
+      if (e.target.name !== 'pred-type') return;
+      predictionType = e.target.value;
+      var h = +(document.getElementById('fcast-slider')?.value || 0);
+      _setForecastHour(h);
+      _updateRiskLegend();
+    });
+  }
+
+  function _updateRiskLegend() {
+    var row = document.getElementById('legend-risk-row');
+    if (!row) return;
+    if (predictionType === 'wind') {
+      row.innerHTML = '<span class="leg-swatch" style="background:#1e88e5;opacity:.75"></span>High risk zone (Wind)';
+    } else {
+      row.innerHTML = '<span class="leg-swatch" style="background:#ff2222;opacity:.7"></span>High risk zone (ML)';
+    }
+  }
+
+  // ── DEV Window ────────────────────────────────────────────────────────────────
+
+  function initDevWindow() {
+    var win     = document.getElementById('dev-window');
+    var togBtn  = document.getElementById('dev-toggle-btn');
+    var closeBtn = document.getElementById('dev-window-close');
+
+    if (!win) return;
+
+    // Toggle visibility
+    togBtn && togBtn.addEventListener('click', function() {
+      win.classList.toggle('hidden');
+      if (!win.classList.contains('hidden')) {
+
+        var runBtn    = document.getElementById('dev-run-pred-btn');
+        var rerunBtn  = document.getElementById('dev-rerun-pred-btn');
+        var simBtn    = document.getElementById('dev-sim-btn');
+        if (runBtn)   runBtn.disabled   = !currentEvent;
+        if (rerunBtn) rerunBtn.disabled = !currentEvent;
+        _updateSimBtnState();
+      }
+    });
+    closeBtn && closeBtn.addEventListener('click', function() { win.classList.add('hidden'); });
+
+    // Tab switching
+    win.addEventListener('click', function(e) {
+      var tab = e.target.closest('.dev-tab');
+      if (!tab) return;
+      var targetId = tab.dataset.tab;
+      win.querySelectorAll('.dev-tab').forEach(function(t) { t.classList.remove('active'); });
+      win.querySelectorAll('.dev-tab-panel').forEach(function(p) { p.classList.add('hidden'); });
+      tab.classList.add('active');
+      var panel = document.getElementById(targetId);
+      if (panel) panel.classList.remove('hidden');
+    });
+
+    // Drag handle
+    var header   = document.getElementById('dev-window-header');
+    var dragging = false, startX, startY, origLeft, origTop;
+    header && header.addEventListener('mousedown', function(e) {
+      if (e.target === closeBtn) return;
+      dragging = true;
+      var r = win.getBoundingClientRect();
+      startX = e.clientX; startY = e.clientY;
+      origLeft = r.left;  origTop = r.top;
+      e.preventDefault();
+    });
+    document.addEventListener('mousemove', function(e) {
+      if (!dragging) return;
+      win.style.right  = 'auto';
+      win.style.bottom = 'auto';
+      win.style.left   = (origLeft + e.clientX - startX) + 'px';
+      win.style.top    = (origTop  + e.clientY - startY) + 'px';
+    });
+    document.addEventListener('mouseup', function() { dragging = false; });
+
+    // ── Time Control buttons — accumulate clicks, apply after 400ms idle ────
+    var _devPendingMs  = 0;   // accumulated hour shifts (ms)
+    var _devPendingDay = 0;   // accumulated day jumps
+    var _devApplyTimer = null;
+
+    var _devPendingLabel = document.getElementById('dev-pending-label');
+
+    function _devUpdatePendingLabel() {
+      if (!_devPendingLabel) return;
+      var parts = [];
+      if (_devPendingMs !== 0) {
+        var totalH = _devPendingMs / 3600000;
+        var d = Math.trunc(totalH / 24);
+        var h = totalH % 24;
+        if (d !== 0) parts.push((d > 0 ? '+' : '') + d + 'd');
+        if (h !== 0) parts.push((h > 0 ? '+' : '') + h + 'h');
+      }
+      if (parts.length) {
+        _devPendingLabel.textContent = 'queued: ' + parts.join(' ');
+        _devPendingLabel.style.display = '';
+      } else {
+        _devPendingLabel.style.display = 'none';
+      }
+    }
+
+    function _devFlushPending() {
+      var msToApply  = _devPendingMs;
+      var dayToApply = _devPendingDay;
+      _devPendingMs  = 0;
+      _devPendingDay = 0;
+      _devUpdatePendingLabel();   // clear label first regardless of outcome
+      if (msToApply !== 0) _devShiftReplayTime(msToApply);
+      if (dayToApply !== 0) {
+        var d = new Date(_replayVirtualTime);
+        var target = new Date(d.getFullYear(), d.getMonth(), d.getDate() + dayToApply, 12, 0, 0);
+        _replayVirtualTime = target.getTime();
+        _devApplyReplayTime();
+      }
+    }
+
+    function _devScheduleFlush() {
+      clearTimeout(_devApplyTimer);
+      _devApplyTimer = setTimeout(_devFlushPending, 600);
+    }
+
+    function _devQueueHr(delta) {
+      _devPendingMs += delta;
+      _devUpdatePendingLabel();
+      _devScheduleFlush();
+    }
+
+    function _devQueueDay(delta) {
+      _devPendingDay += delta;
+      _devUpdatePendingLabel();
+      _devScheduleFlush();
+    }
+
+    document.getElementById('dev-ts-hr-minus')  && document.getElementById('dev-ts-hr-minus').addEventListener('click',  function() { _devQueueHr(-3600000); });
+    document.getElementById('dev-ts-hr-plus')   && document.getElementById('dev-ts-hr-plus').addEventListener('click',   function() { _devQueueHr(3600000);  });
+    document.getElementById('dev-ts-day-minus') && document.getElementById('dev-ts-day-minus').addEventListener('click', function() { _devQueueDay(-1); });
+    document.getElementById('dev-ts-day-plus')  && document.getElementById('dev-ts-day-plus').addEventListener('click',  function() { _devQueueDay(+1); });
+    document.getElementById('dev-ts-speed') && document.getElementById('dev-ts-speed').addEventListener('click', function() {
+      _replaySpeed = _replaySpeed === 1 ? 60 : 1;
+      this.textContent = 'x' + _replaySpeed;
+      this.classList.toggle('dev-speed-active', _replaySpeed !== 1);
+    });
+
+    // ── Run Prediction ───────────────────────────────────────────────────────
+    document.getElementById('dev-run-pred-btn') && document.getElementById('dev-run-pred-btn').addEventListener('click', function() {
+      if (!currentEvent || _currentTsIndex < 0 || !_timestepsDone.length) return;
+      var ts  = _timestepsDone[_currentTsIndex];
+      var btn = this;
+      btn.disabled = true;
+      _crowdMode = false;  // revert immediately — standard prediction supersedes crowd layers
+      window.API.rerunPredictionStep(currentEvent.id, ts.id)
+        .then(function() {
+          selectTimestep(ts);   // reload map with standard layers right away
+          _showPredStatus();
+          _pollUntilDone(ts);
+          btn.disabled = false;
+        })
+        .catch(function() { btn.disabled = false; });
+    });
+
+    // ── Rerun Prediction (force + crowd data) ────────────────────────────────
+    document.getElementById('dev-rerun-pred-btn') && document.getElementById('dev-rerun-pred-btn').addEventListener('click', function() {
+      if (!currentEvent || _currentTsIndex < 0 || !_timestepsDone.length) return;
+      var ts  = _timestepsDone[_currentTsIndex];
+      var btn = this;
+      btn.disabled = true;
+
+      window.API.rerunCrowdPredictionStep(currentEvent.id, ts.id)
+        .then(function() {
+          _showPredStatus();
+          _pollCrowdUntilDone(ts);
+          btn.disabled = false;
+        })
+        .catch(function(err) {
+          btn.disabled = false;
+        });
+    });
+
+    // ── Actual Perimeter toggle ──────────────────────────────────────────────
+    document.getElementById('dev-actual-toggle') && document.getElementById('dev-actual-toggle').addEventListener('change', function() {
+      var legendRow = document.getElementById('legend-actual-row');
+      if (this.checked) {
+        if (legendRow) legendRow.style.display = '';
+        if (_currentTsIndex >= 0 && _timestepsDone.length) {
+          _loadActualPerimeter(_timestepsDone[_currentTsIndex]);
+        }
+      } else {
+        if (legendRow) legendRow.style.display = 'none';
+        eventMap && eventMap.clearActualPerimeter();
+      }
+    });
+
+    // ── User Simulator ───────────────────────────────────────────────────────
+    document.getElementById('dev-sim-btn') && document.getElementById('dev-sim-btn').addEventListener('click', function() {
+      if (!currentEvent) { showToast('No event selected', 'error'); return; }
+      var btn    = this;
+      var status = document.getElementById('dev-sim-status');
+      var n      = parseInt(document.getElementById('dev-sim-count')?.value) || 5;
+      var hints  = (document.getElementById('dev-sim-hint')?.value || '').trim();
+
+      btn.disabled = true;
+      if (status) status.textContent = 'Generating ' + n + ' report(s)…';
+
+      var _simTs   = (_currentTsIndex >= 0 && _timestepsDone.length) ? _timestepsDone[_currentTsIndex] : null;
+      var _simTsId = _simTs ? _simTs.id : null;
+      var _simVirtualTime = new Date(_replayVirtualTime).toISOString();
+      window.API.simulateFieldReports(currentEvent.id, n, hints, _simTsId, _simVirtualTime)
+        .then(function(reports) {
+          if (status) status.textContent = '✓ ' + reports.length + ' report(s) created';
+          btn.disabled = false;
+          if (window.CrowdPanel) window.CrowdPanel.refresh(new Date(_replayVirtualTime).toISOString());
+        })
+        .catch(function(err) {
+          if (status) status.textContent = 'Error: ' + (err.message || 'unknown');
+          btn.disabled = false;
+        });
+    });
+
+    document.getElementById('dev-sim-clear-btn') && document.getElementById('dev-sim-clear-btn').addEventListener('click', function() {
+      if (!currentEvent) { showToast('No event selected', 'error'); return; }
+      if (!confirm('Delete ALL field reports for this event? This cannot be undone.')) return;
+      var btn    = this;
+      var status = document.getElementById('dev-sim-status');
+      btn.disabled = true;
+      if (status) status.textContent = 'Clearing…';
+      window.API.clearFieldReports(currentEvent.id)
+        .then(function(res) {
+          if (status) status.textContent = '✓ Deleted ' + (res.deleted || 0) + ' report(s)';
+          btn.disabled = false;
+          if (window.CrowdPanel) window.CrowdPanel.refresh(new Date(_replayVirtualTime).toISOString());
+        })
+        .catch(function(err) {
+          if (status) status.textContent = 'Error: ' + (err.message || 'unknown');
+          btn.disabled = false;
+        });
+    });
+  }
+
+
+  // Shift the replay clock by deltaMs, snap _replayIdx to the correct timestep.
+  function _showPredStatus() {
+    var bar = document.getElementById('prediction-status-bar');
+    if (bar) bar.classList.remove('hidden');
+  }
+
+  function _hidePredStatus() {
+    var bar = document.getElementById('prediction-status-bar');
+    if (bar) bar.classList.add('hidden');
+  }
+
+  function _devShiftReplayTime(deltaMs) {
+    if (!_timestepsDone.length) return;
+    _replayVirtualTime += deltaMs;
+    _devApplyReplayTime();
+  }
+
+  // Jump to 12:00:00 local time of the next (+1) or previous (-1) calendar day.
+  function _devJumpDay(delta) {
+    if (!_timestepsDone.length) return;
+    var d = new Date(_replayVirtualTime);
+    var noon = new Date(d.getFullYear(), d.getMonth(), d.getDate() + delta, 12, 0, 0);
+    _replayVirtualTime = noon.getTime();
+    _devApplyReplayTime();
+  }
+
+  function _devApplyReplayTime() {
+    var first = new Date(_timestepsDone[0].slot_time).getTime();
+    var last  = new Date(_timestepsDone[_timestepsDone.length - 1].slot_time).getTime();
+    _replayVirtualTime = Math.max(first, Math.min(last, _replayVirtualTime));
+
+    // Find the correct _replayIdx for this virtual time
+    _replayIdx = 0;
+    for (var i = 0; i < _timestepsDone.length; i++) {
+      if (new Date(_timestepsDone[i].slot_time).getTime() <= _replayVirtualTime) {
+        _replayIdx = i;
+      } else { break; }
+    }
+    _currentTsIndex = _replayIdx;
+
+    var label = document.getElementById('ts-label');
+    if (label) label.textContent = fmtDateTime(new Date(_replayVirtualTime).toISOString());
+    setGapBadge(_timestepsDone[_replayIdx]);
+    _highlightTick(_replayIdx);
+    selectTimestep(_timestepsDone[_replayIdx]);
+
+    // Immediately persist so a page refresh restores this position
+    if (_isAdmin && currentEvent) {
+      window.API.setReplayTime(currentEvent.id, _replayVirtualTime).catch(function(){});
+    }
+  }
+
+  function _loadActualPerimeter(ts) {
+    if (!currentEvent || !eventMap || !ts) return;
+    window.API.getActualPerimeter(currentEvent.id, ts.id)
+      .then(function(geo) {
+        eventMap.renderActualPerimeter(geo);
+        // Apply current slider position immediately after render
+        var h = +(document.getElementById('fcast-slider')?.value || 0);
+        eventMap.setActualPerimVisible('+0h',  h <= 2);
+        eventMap.setActualPerimVisible('+3h',  h >= 3  && h <= 5);
+        eventMap.setActualPerimVisible('+6h',  h >= 6  && h <= 11);
+        eventMap.setActualPerimVisible('+12h', h >= 12);
+      })
+      .catch(function() { eventMap.clearActualPerimeter(); });
+  }
+
 })();

@@ -33,6 +33,7 @@
 
   // Road colours for dark basemaps (Dark, Satellite, Sentinel-2)
   const ROAD_COLORS_DARK = {
+    burning:     '#ff0066',
     burned:      '#cc0000',
     at_risk_3h:  '#ff3333',
     at_risk_6h:  '#ff8c00',
@@ -42,6 +43,7 @@
 
   // Road colours for light basemaps (Light, OSM, Topo) — darker + higher contrast
   const ROAD_COLORS_LIGHT = {
+    burning:     '#cc0055',
     burned:      '#7a0000',
     at_risk_3h:  '#b30000',
     at_risk_6h:  '#a04400',
@@ -59,6 +61,13 @@
     high:   { color: '#ff2222', fillColor: '#ff2222', fillOpacity: 0.35, weight: 1.8, opacity: 0.95 },
     medium: { color: '#ff8c00', fillColor: '#ff8c00', fillOpacity: 0.25, weight: 1.4, opacity: 0.85 },
     low:    { color: '#ffd700', fillColor: '#ffd700', fillOpacity: 0.16, weight: 1.0, opacity: 0.70 },
+  };
+
+  // Wind-driven prediction — blue shades (deep → mid → light)
+  const RISK_WIND_STYLES = {
+    high:   { color: '#0d47a1', fillColor: '#1565c0', fillOpacity: 0.38, weight: 1.8, opacity: 0.95 },
+    medium: { color: '#1565c0', fillColor: '#1e88e5', fillOpacity: 0.26, weight: 1.4, opacity: 0.85 },
+    low:    { color: '#1976d2', fillColor: '#90caf9', fillOpacity: 0.16, weight: 1.0, opacity: 0.70 },
   };
 
   // ── HOME MAP ────────────────────────────────────────────────────────────────
@@ -129,6 +138,8 @@
           fillColor: '#ff6b35', fillOpacity: 0.06,
           dashArray: '7 4',
           className: 'event-rect',
+          interactive: true,
+          bubblingMouseEvents: false,
         });
         rect.bindTooltip(
           '<div style="font-weight:700;font-size:13px">' + ev.name + '</div>' +
@@ -186,6 +197,20 @@
         roads:     L.layerGroup().addTo(this.map),
         hotspots:  L.layerGroup().addTo(this.map),
       };
+      // Wind-driven risk zone layers (separate from ML layers)
+      this._windLayers = {
+        wRisk3h:  L.layerGroup().addTo(this.map),
+        wRisk6h:  L.layerGroup().addTo(this.map),
+        wRisk12h: L.layerGroup().addTo(this.map),
+      };
+      // Actual (ground-truth) perimeter — one layer group per horizon
+      this._actualPerimLayers = {
+        '+0h':  L.layerGroup().addTo(this.map),
+        '+3h':  L.layerGroup().addTo(this.map),
+        '+6h':  L.layerGroup().addTo(this.map),
+        '+12h': L.layerGroup().addTo(this.map),
+      };
+
       this._velocityLayer = null;
       this._windFieldHours = [];
       this._windFieldGroup = L.layerGroup().addTo(this.map);
@@ -203,6 +228,7 @@
       this._basemapControl = L.control.layers(this._baseTiles, {}, {
         position: 'topright', collapsed: true,
       }).addTo(this.map);
+      this._basemapControl.getContainer().classList.add('basemap-control');
 
       this._darkBase     = true;   // tracks whether current basemap is dark
       this._roadsGeoJSON = null;   // cached for re-render on basemap change
@@ -222,6 +248,16 @@
       }, { position: 'topright', collapsed: true }).addTo(this.map);
     }
 
+    addOverlay(label, layer) {
+      if (this._overlayControl) this._overlayControl.addOverlay(layer, label);
+      layer.addTo(this.map);
+    }
+
+    removeOverlay(layer) {
+      if (this._overlayControl) this._overlayControl.removeLayer(layer);
+      layer.remove();
+    }
+
     setTheme(dark) {
       this._dark = dark;
       const t = dark ? TILES.dark : TILES.light;
@@ -230,9 +266,11 @@
 
     setSatelliteDate(dateStr) {
       if (!dateStr) return;
-      const base = (window.API && window.API.BASE) || '';
+      const base  = (window.API && window.API.BASE) || '';
+      const token = localStorage.getItem('wf_token') || '';
       this._satelliteTile.setUrl(
-        base + '/api/satellite/tile/{z}/{x}/{y}?date=' + dateStr
+        base + '/api/satellite/tile/{z}/{x}/{y}?date=' + dateStr +
+        (token ? '&token=' + encodeURIComponent(token) : '')
       );
       if (this.map.hasLayer(this._satelliteTile)) {
         this._satelliteTile.redraw();
@@ -263,6 +301,8 @@
 
     clearLayers() {
       Object.values(this._layers).forEach(lg => lg.clearLayers());
+      Object.values(this._windLayers).forEach(lg => lg.clearLayers());
+      Object.values(this._actualPerimLayers).forEach(lg => lg.clearLayers());
     }
 
     setRiskVisible(horizon, visible) {
@@ -361,8 +401,8 @@
       }
       this._windFieldGroup.clearLayers();
       this._velocityLayer = L.velocityLayer({
-        displayValues:      true,
-        displayOptions:     { velocityType: 'Wind', position: 'bottomleft', emptyString: 'No wind data', angleConvention: 'bearingCW', speedUnit: 'km/h' },
+        displayValues:      false,
+        displayOptions:     { velocityType: 'Wind', position: 'bottomleft', emptyString: '', angleConvention: 'bearingCW', speedUnit: 'km/h' },
         data:               entry.data,
         maxVelocity:        25,
         colorScale:         ['#aaddff', '#55bbff', '#ff8c00', '#ff3300'],
@@ -373,6 +413,82 @@
       this._windFieldGroup.addLayer(this._velocityLayer);
     }
 
+    // ── Wind-driven risk zones ────────────────────────────────────────────────
+
+    renderRiskZonesWind(geojson) {
+      Object.values(this._windLayers).forEach(lg => lg.clearLayers());
+      if (!geojson?.features?.length) return;
+      const byH = { '12h': [], '6h': [], '3h': [] };
+      geojson.features.forEach(function(f) {
+        const h = f.properties?.horizon;
+        if (byH[h]) byH[h].push(f);
+      });
+      ['12h', '6h', '3h'].forEach(function(h) {
+        if (!byH[h].length) return;
+        const key = 'wRisk' + h;
+        L.geoJSON({ type: 'FeatureCollection', features: byH[h] }, {
+          style(f) { return RISK_WIND_STYLES[f.properties?.risk_level] || RISK_WIND_STYLES.low; },
+          onEachFeature(f, layer) {
+            const p = f.properties || {};
+            layer.bindPopup('<b>Wind-driven Risk +' + p.horizon + '</b><br>' +
+              'Level: ' + (p.risk_level || 'N/A') + '<br>' +
+              'P(spread) max: ' + (p.prob_max != null ? (p.prob_max * 100).toFixed(1) + '%' : 'N/A'));
+          },
+        }).addTo(this._windLayers[key]);
+        this.map.removeLayer(this._windLayers[key]);   // hidden until slider activates it
+      }, this);
+    }
+
+    setWindRiskVisible(horizon, visible) {
+      const key = 'wRisk' + horizon.replace('+', '');
+      const lg = this._windLayers[key];
+      if (!lg) return;
+      if (visible) this.map.addLayer(lg);
+      else         this.map.removeLayer(lg);
+    }
+
+    // ── Actual perimeter (DEV ground-truth overlay) ───────────────────────────
+
+    renderActualPerimeter(geojson) {
+      Object.values(this._actualPerimLayers).forEach(lg => lg.clearLayers());
+      if (!geojson?.features?.length) return;
+      const horizonColor = { '+0h': '#e0e0e0', '+3h': '#a0c4ff', '+6h': '#74b9ff', '+12h': '#0984e3' };
+      geojson.features.forEach(f => {
+        const p   = f.properties || {};
+        const key = p.horizon || '+0h';
+        const lg  = this._actualPerimLayers[key];
+        if (!lg) return;
+        const c = horizonColor[key] || '#e0e0e0';
+        const layer = L.geoJSON(f, {
+          style: { color: c, weight: 2, fillColor: c, fillOpacity: 0.10, dashArray: '8 4', opacity: 0.85 },
+        });
+        const date = p.date || p.maxdate || p.lastdate || '';
+        layer.bindPopup(
+          '<b>Actual Perimeter ' + key + '</b>' +
+          (date ? '<br><span style="font-size:11px;opacity:.7">' + date + '</span>' : '') +
+          '<br><span style="font-size:10px;opacity:.6">Ground truth</span>'
+        );
+        layer.addTo(lg);
+        this.map.removeLayer(lg);   // hidden until slider activates it
+      });
+    }
+
+    setActualPerimVisible(horizon, visible) {
+      const lg = this._actualPerimLayers[horizon];
+      if (!lg) return;
+      if (visible) this.map.addLayer(lg);
+      else         this.map.removeLayer(lg);
+    }
+
+    clearActualPerimeter() {
+      Object.values(this._actualPerimLayers).forEach(lg => {
+        lg.clearLayers();
+        this.map.removeLayer(lg);
+      });
+    }
+
+    // ── Roads ─────────────────────────────────────────────────────────────────
+
     renderRoads(geojson) {
       this._roadsGeoJSON = geojson;
       this._layers.roads.clearLayers();
@@ -381,15 +497,19 @@
       L.geoJSON(geojson, {
         style(f) {
           const s = f.properties?.status || 'clear';
-          return { color: colors[s] || '#888', weight: s === 'clear' ? 2 : 3.5, opacity: s === 'clear' ? 0.5 : 0.9 };
+          const w = s === 'clear' ? 2 : s === 'burning' ? 4.5 : 3.5;
+          const o = s === 'clear' ? 0.5 : 0.9;
+          return { color: colors[s] || '#888', weight: w, opacity: o };
         },
         onEachFeature(f, layer) {
           const p = f.properties || {};
-          let html = '<b>' + (p.road_name || 'Road') + '</b><br>Status: <b>' + (p.status || 'N/A') + '</b>';
-          if (p.cut_at) html += '<br>First cut: ' + p.cut_at;
-          if (p.cut_location?.length) {
-            html += '<br>Cut points:<ul style="margin:3px 0 0 12px;padding:0">' +
-              p.cut_location.map(l => '<li>' + l + '</li>').join('') + '</ul>';
+          const statusLabel = p.status || 'N/A';
+          let html = '<b>' + (p.road_name || 'Road') + '</b><br>Status: <b>' + statusLabel + '</b>';
+          const sections = Array.isArray(p.sections) ? p.sections
+                         : (typeof p.sections === 'string' ? JSON.parse(p.sections) : []);
+          if (sections.length) {
+            html += '<br>Affected sections:<ul style="margin:3px 0 0 12px;padding:0">' +
+              sections.map(s => '<li>' + s.from + ' → ' + s.to + '</li>').join('') + '</ul>';
           }
           layer.bindPopup(html);
         },

@@ -26,6 +26,7 @@
   <button class="header-btn" id="auth-login-btn">Sign In</button>
   <button class="header-btn hidden" id="auth-logout-btn">Sign Out</button>
   <button class="header-btn" id="theme-toggle" aria-label="Toggle theme"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg></button>
+  <button class="header-btn dev-toggle-btn" id="dev-toggle-btn" title="Open DEV console">⚙ DEV</button>
 </header>
 
 <!-- ══════════════════════════════════════════════════════════
@@ -56,11 +57,6 @@
 
     <!-- Left panel -->
     <aside id="left-panel">
-      <div class="lp-header">
-        <div class="lp-event-name" id="lp-event-name">—</div>
-        <div class="lp-event-meta" id="lp-event-meta"></div>
-      </div>
-
       <div class="lp-section-title">Timestep Replay</div>
       <div id="timestep-slider-section">
         <div class="empty-msg">Loading…</div>
@@ -77,9 +73,28 @@
           <div class="fcast-tick-row">
             <span>0</span><span>+3h</span><span>+6h</span><span>+12h</span>
           </div>
-          <div id="fcast-weather" class="fcast-weather">
-            <span style="opacity:.4;font-size:10px">Loading…</span>
-          </div>
+        </div>
+      </div>
+
+      <div class="lp-section-title">Prediction Type</div>
+      <div id="pred-type-section">
+        <div class="pred-type-wrap">
+          <label class="pred-type-opt">
+            <input type="radio" name="pred-type" value="ml" checked>
+            <span class="pred-type-swatch ml-swatch"></span>
+            <span class="pred-type-info">
+              <span class="pred-type-label">ML Model</span>
+              <span class="pred-type-hint">Random Forest · Red/Orange/Yellow</span>
+            </span>
+          </label>
+          <label class="pred-type-opt">
+            <input type="radio" name="pred-type" value="wind">
+            <span class="pred-type-swatch wind-swatch"></span>
+            <span class="pred-type-info">
+              <span class="pred-type-label">Wind-driven</span>
+              <span class="pred-type-hint">Physics-based · Blue shades</span>
+            </span>
+          </label>
         </div>
       </div>
 
@@ -88,9 +103,14 @@
     <!-- Map (full remaining width) -->
     <div id="event-map-wrap">
       <div id="event-map"></div>
+      <div id="prediction-status-bar" class="hidden">
+        <span class="pred-status-spinner"></span>
+        <span id="prediction-status-text">Building prediction…</span>
+      </div>
       <div id="event-legend">
         <div class="leg-row"><span class="leg-swatch" style="background:#cc2200;opacity:.7"></span>Fire perimeter</div>
-        <div class="leg-row"><span class="leg-swatch" style="background:#ff2222;opacity:.7"></span>High risk zone</div>
+        <div class="leg-row" id="legend-risk-row"><span class="leg-swatch" style="background:#ff2222;opacity:.7"></span>High risk zone (ML)</div>
+        <div class="leg-row" id="legend-actual-row" style="display:none"><span class="leg-swatch" style="background:#888;opacity:.5;border:1px dashed #aaa"></span>Actual perimeter</div>
         <div class="leg-row"><span class="leg-line" style="background:#cc0000"></span>Burned road</div>
         <div class="leg-row"><span class="leg-line" style="background:#ff8c00"></span>At-risk road</div>
         <div class="leg-row"><span class="leg-line" style="background:#44dd44"></span>Clear road</div>
@@ -102,6 +122,9 @@
   <!-- Bottom dashboard -->
   <div id="bottom-panel">
     <div id="bottom-header">
+      <button id="dash-collapse-btn" class="dash-collapse-btn" title="Collapse dashboard">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
       <span class="bottom-title">Situation Dashboard</span>
     </div>
     <div id="dashboard-content">
@@ -181,10 +204,184 @@
   </div>
 </div>
 
+<!-- ══════════════════════════════════════════════════════════
+     DEV CONSOLE WINDOW
+══════════════════════════════════════════════════════════ -->
+<div id="dev-window" class="hidden">
+  <div id="dev-window-header">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="opacity:.6"><path d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z"/></svg>
+    <span>DEV Console</span>
+    <div class="dev-win-spacer"></div>
+    <button id="dev-window-close" title="Close">✕</button>
+  </div>
+  <div id="dev-window-body">
+
+    <!-- ── Tabs ── -->
+    <div class="dev-tabs">
+      <button class="dev-tab active" data-tab="dev-tab-controls">Controls</button>
+      <button class="dev-tab" data-tab="dev-tab-simulator">User Simulator</button>
+    </div>
+
+    <!-- ── Tab: Controls ── -->
+    <div id="dev-tab-controls" class="dev-tab-panel">
+
+      <div class="dev-section-title">Time Control</div>
+      <div class="dev-time-section">
+        <div class="dev-time-btns">
+          <button class="dev-time-btn dev-time-pair" id="dev-ts-hr-minus">−1h</button>
+          <button class="dev-time-btn dev-time-pair" id="dev-ts-hr-plus">+1h</button>
+          <button class="dev-time-btn dev-time-pair" id="dev-ts-day-minus">−1d</button>
+          <button class="dev-time-btn dev-time-pair" id="dev-ts-day-plus">+1d</button>
+          <button class="dev-time-btn dev-time-speed" id="dev-ts-speed">x1</button>
+        </div>
+        <div id="dev-pending-label" class="dev-pending-label" style="display:none"></div>
+      </div>
+
+      <div class="dev-section-title">Prediction Engine</div>
+      <div class="dev-pred-section">
+        <button id="dev-run-pred-btn" class="dev-action-btn" disabled>▶ Run Prediction</button>
+        <button id="dev-rerun-pred-btn" class="dev-action-btn dev-action-btn--secondary" disabled>↺ Rerun with Crowd Data</button>
+        <div id="dev-pred-progress" class="hidden">
+          <div class="dev-progress-track"><div id="dev-progress-fill" class="dev-progress-fill"></div></div>
+          <div id="dev-progress-label" class="dev-progress-label">Initialising…</div>
+        </div>
+      </div>
+
+      <div class="dev-section-title">Ground Truth Overlay</div>
+      <div class="dev-gt-section">
+        <label class="dev-toggle-row">
+          <input type="checkbox" id="dev-actual-toggle">
+          <span class="dev-toggle-label">Show actual perimeter</span>
+        </label>
+        <div class="dev-gt-hint">Grey dashed layer — compare ML vs Wind-driven accuracy</div>
+      </div>
+
+    </div>
+
+    <!-- ── Tab: User Simulator ── -->
+    <div id="dev-tab-simulator" class="dev-tab-panel hidden">
+      <div class="dev-section-title">Generate Field Reports</div>
+      <div class="dev-sim-section">
+        <div class="dev-sim-row">
+          <label class="dev-sim-label">Count</label>
+          <input id="dev-sim-count" type="number" min="1" max="20" value="5" class="dev-sim-input dev-sim-input--num" />
+        </div>
+        <div class="dev-sim-row">
+          <label class="dev-sim-label">Scenario hint</label>
+          <input id="dev-sim-hint" type="text" placeholder="e.g. heavy smoke near downtown" class="dev-sim-input" />
+        </div>
+        <button id="dev-sim-btn" class="dev-action-btn">⚡ Generate Reports</button>
+        <button id="dev-sim-clear-btn" class="dev-action-btn dev-action-btn--danger">🗑 Clear All Reports</button>
+        <div id="dev-sim-status" class="dev-sim-status"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     CROWD INTELLIGENCE PANEL
+══════════════════════════════════════════════════════════ -->
+
+<!-- Overlay + slide-in panel -->
+<div id="crowd-panel-overlay" class="hidden"></div>
+<div id="crowd-panel" class="hidden">
+  <div class="crowd-panel-header">
+    <span class="crowd-panel-title">Field Intelligence</span>
+    <button id="crowd-panel-close">✕</button>
+  </div>
+
+  <div class="crowd-tabs">
+    <button class="crowd-tab active" data-tab="submit">Submit</button>
+    <button class="crowd-tab" data-tab="reports">Reports</button>
+  </div>
+
+  <!-- Submit tab -->
+  <div class="crowd-tab-content" id="crowd-tab-submit">
+    <form id="crowd-submit-form">
+      <label>Report Type</label>
+      <select id="crowd-post-type" class="crowd-input">
+        <option value="fire_report">Fire Report</option>
+        <option value="info">Information</option>
+        <option value="request_help">Request Help</option>
+        <option value="offer_help">Offer Help</option>
+      </select>
+
+      <label>Description</label>
+      <textarea id="crowd-description" class="crowd-input" rows="3" placeholder="What are you observing?"></textarea>
+
+      <label>Location (WGS84)</label>
+      <div class="crowd-loc-row">
+        <input type="number" id="crowd-lat" class="crowd-input" placeholder="Latitude"  step="0.00001">
+        <input type="number" id="crowd-lon" class="crowd-input" placeholder="Longitude" step="0.00001">
+        <button type="button" id="crowd-pick-btn" class="crowd-pick-btn" title="Click map to pick location">📍</button>
+      </div>
+
+      <label>Photo (optional)</label>
+      <input type="file" id="crowd-photo" class="crowd-input" accept="image/*">
+
+      <button type="submit" id="crowd-submit-btn" class="crowd-submit-btn">Submit Report</button>
+      <div id="crowd-submit-result" class="crowd-result hidden"></div>
+    </form>
+  </div>
+
+  <!-- Reports tab -->
+  <div class="crowd-tab-content hidden" id="crowd-tab-reports">
+    <div id="crowd-reports-list"><div class="crowd-empty">Select Reports tab to load</div></div>
+  </div>
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     FIELD REPORT POPUP MODAL
+══════════════════════════════════════════════════════════ -->
+<div id="cr-modal-overlay" class="hidden"></div>
+<div id="cr-modal" class="hidden">
+  <div class="cr-modal-header">
+    <div class="cr-modal-title-row">
+      <span id="cr-modal-icon" class="cr-modal-icon"></span>
+      <span id="cr-modal-type" class="cr-modal-type"></span>
+      <span class="cr-modal-spacer"></span>
+      <span id="cr-modal-time" class="cr-modal-time"></span>
+    </div>
+    <button id="cr-modal-close" class="cr-modal-close-btn">✕</button>
+  </div>
+
+  <div class="cr-modal-body">
+    <p id="cr-modal-desc" class="cr-modal-desc"></p>
+
+    <div class="cr-modal-nav-row">
+      <span id="cr-modal-coords" class="cr-modal-coords"></span>
+      <a id="cr-modal-maps-link" href="#" target="_blank" rel="noopener"
+         class="cr-maps-link">
+        🗺 Google Maps
+      </a>
+    </div>
+
+    <div class="cr-modal-actions">
+      <button id="cr-modal-like" class="cr-action-btn cr-like-btn">♥ 0</button>
+      <button id="cr-modal-flag" class="cr-action-btn cr-flag-btn">⚑ Report</button>
+    </div>
+
+    <div class="cr-comments-section">
+      <div class="cr-comments-label">Comments</div>
+      <div id="cr-modal-comments-list" class="cr-comments-list">
+        <div class="cr-comments-empty">No comments yet</div>
+      </div>
+      <form id="cr-modal-comment-form" class="cr-comment-form">
+        <input id="cr-modal-comment-input" class="cr-comment-input"
+               type="text" placeholder="Add a comment…" autocomplete="off">
+        <button type="submit" class="cr-comment-submit">Send</button>
+      </form>
+    </div>
+  </div>
+</div>
+
 <script src="js/api.js"></script>
 <script src="js/map.js"></script>
 <script src="js/dashboard.js"></script>
 <script src="js/chat.js"></script>
+<script src="js/crowd.js"></script>
 <script src="js/app.js"></script>
 
 </body>

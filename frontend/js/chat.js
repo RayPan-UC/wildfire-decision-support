@@ -18,13 +18,46 @@
   let _cardState = 'idle';    // 'idle' | 'loading' | 'done'
   let _genId = 0;             // generation counter to discard stale responses
 
-  const INITIAL_QUESTIONS = [
-    'What are the immediate evacuation priorities?',
-    'Which roads are at highest risk in the next 6 hours?',
-    'How many people are in the current risk zone?',
-    'What weather conditions are driving fire spread?',
-    'What is the overall fire danger level right now?',
-  ];
+  let _reportData = null;  // cached report for deriving questions
+
+  function _generateInitialQuestions(report) {
+    const qs = [];
+
+    if (report.risk_level && report.risk_level !== 'Unknown') {
+      qs.push('Why is the risk level classified as ' + report.risk_level + '?');
+    }
+
+    if (report.key_points && report.key_points.length) {
+      report.key_points.slice(0, 2).forEach(function(pt) {
+        qs.push('Tell me more about: ' + pt.replace(/\.$/, ''));
+      });
+    }
+
+    const evac = report.evacuation || {};
+    if (evac.top_route && evac.top_route.path && evac.top_route.path.length) {
+      qs.push('What is the recommended primary evacuation route?');
+    }
+    if (evac.alternative_route && evac.alternative_route.window) {
+      qs.push('How long do we have before evacuation routes are compromised?');
+    }
+
+    const impact = report.impact || {};
+    if (impact.communities_affected && impact.communities_affected.length) {
+      qs.push('Which communities have the highest population at risk?');
+    }
+
+    const risk = report.risk || {};
+    if (risk.weather_drivers) {
+      qs.push('What weather conditions are driving fire spread right now?');
+    }
+
+    const crowd = report.crowd || {};
+    if (crowd.urgent_help && crowd.urgent_help.length) {
+      qs.push('Are there any urgent help requests from the public?');
+    }
+
+    return qs.slice(0, 5);
+  }
 
   // ── Public API ───────────────────────────────────────────────────────────────
 
@@ -78,7 +111,11 @@
       '<div class="ai-card-body" id="ai-card-body"></div>';
     content.appendChild(card);
     _updateCard();
-    card.addEventListener('click', _onCardClick);
+    // Main card click (not on the crowd button)
+    card.addEventListener('click', function(e) {
+      if (e.target.closest('#ai-crowd-btn')) return;
+      _onCardClick();
+    });
   }
 
   function _updateCard() {
@@ -92,14 +129,21 @@
       body.innerHTML = '<div class="spinner-sm"></div><div class="ai-card-status">Generating…</div>';
     } else if (_cardState === 'done') {
       body.className = 'ai-card-body done';
-      body.innerHTML = '<div class="ai-card-ready">Report ready</div><div class="ai-card-view">Click to view →</div>';
+      body.innerHTML =
+        '<div class="ai-card-ready">Report ready</div>' +
+        '<div class="ai-card-view">Click to view →</div>' +
+        '<button id="ai-crowd-btn" class="ai-crowd-btn" title="Re-run with latest crowd reports">↺ Update with user reports</button>';
+      document.getElementById('ai-crowd-btn').addEventListener('click', _startGenerateWithCrowd);
+    } else if (_cardState === 'crowd-loading') {
+      body.className = 'ai-card-body loading';
+      body.innerHTML = '<div class="spinner-sm"></div><div class="ai-card-status">Updating with crowd data…</div>';
     }
   }
 
   function _onCardClick() {
     if (_cardState === 'idle') _startGenerate();
     else if (_cardState === 'done') open();
-    // loading: ignore
+    // loading / crowd-loading: ignore
   }
 
   async function _startGenerate() {
@@ -123,6 +167,33 @@
       const t = document.createElement('div');
       t.className = 'toast error';
       t.textContent = 'AI analysis failed: ' + _escHtml(e.message);
+      document.body.appendChild(t);
+      setTimeout(function() { t.remove(); }, 4000);
+    }
+  }
+
+  async function _startGenerateWithCrowd() {
+    if (!_eid || !_tsid) return;
+    _cardState = 'crowd-loading';
+    _updateCard();
+    const myGenId = ++_genId;
+    try {
+      const report = await window.API.generateReportWithCrowd(_eid, _tsid);
+      if (myGenId !== _genId) return;
+      _renderReport(report);
+      _reportLoaded = true;
+      _cardState = 'done';
+      _updateCard();
+      _showAIToast();
+      // Open modal immediately to show updated report
+      open();
+    } catch(e) {
+      if (myGenId !== _genId) return;
+      _cardState = 'done';
+      _updateCard();
+      const t = document.createElement('div');
+      t.className = 'toast error';
+      t.textContent = 'Crowd update failed: ' + _escHtml(e.message);
       document.body.appendChild(t);
       setTimeout(function() { t.remove(); }, 4000);
     }
@@ -172,12 +243,16 @@
   }
 
   function _renderReport(report) {
+    _reportData = report;
     const tabs = [
-      { id: 'overview',   label: 'Overview',   key: 'situation_overview' },
-      { id: 'risk',       label: 'Risk',       key: 'risk_analysis' },
-      { id: 'impact',     label: 'Impact',     key: 'impact_analysis' },
-      { id: 'evacuation', label: 'Evacuation', key: 'evacuation_analysis' },
+      { id: 'overview',   label: 'Overview' },
+      { id: 'risk',       label: 'Risk' },
+      { id: 'impact',     label: 'Impact' },
+      { id: 'evacuation', label: 'Evacuation' },
     ];
+    if (report.crowd) {
+      tabs.push({ id: 'crowd', label: 'Crowd' });
+    }
 
     const tabsEl   = document.getElementById('ai-report-tabs');
     const panelsEl = document.getElementById('ai-report-panels');
@@ -186,15 +261,16 @@
       return '<button class="report-tab' + (i === 0 ? ' active' : '') + '" data-tab="' + t.id + '">' + t.label + '</button>';
     }).join('');
 
+    const renderers = {
+      overview:   function() { return _renderOverviewPanel(report); },
+      risk:       function() { return _renderRiskPanel(report.risk); },
+      impact:     function() { return _renderImpactPanel(report.impact); },
+      evacuation: function() { return _renderEvacPanel(report.evacuation); },
+      crowd:      function() { return _renderCrowdPanel(report.crowd); },
+    };
+
     panelsEl.innerHTML = tabs.map(function(t, i) {
-      let content;
-      if (t.id === 'overview') {
-        content = _renderOverviewPanel(report);
-      } else {
-        content = report[t.key]
-          ? '<div class="report-section-card"><div class="report-text">' + _fmt(report[t.key]) + '</div></div>'
-          : '<div class="report-na">Not available</div>';
-      }
+      const content = renderers[t.id] ? renderers[t.id]() : '<div class="report-na">Not available</div>';
       return '<div class="report-panel' + (i === 0 ? ' active' : '') + '" id="panel-' + t.id + '">' + content + '</div>';
     }).join('');
 
@@ -208,6 +284,156 @@
     });
 
     _showLoading(false);
+  }
+
+  // ── Structured panel renderers ───────────────────────────────────────────────
+
+  function _card(title, bodyHtml) {
+    return '<div class="rpt-json-card"><div class="rpt-json-card-title">' + _escHtml(title) + '</div>' +
+           '<div class="rpt-json-card-body">' + bodyHtml + '</div></div>';
+  }
+
+  function _kv(label, value) {
+    if (!value && value !== 0) return '';
+    return '<div class="rpt-kv"><span class="rpt-key">' + _escHtml(label) + '</span>' +
+           '<span class="rpt-val">' + _escHtml(String(value)) + '</span></div>';
+  }
+
+  function _tagList(items) {
+    if (!items || !items.length) return '';
+    return '<div class="rpt-tag-list">' +
+      items.map(function(s) { return '<span class="rpt-tag">' + _escHtml(s) + '</span>'; }).join('') +
+      '</div>';
+  }
+
+  function _renderRiskPanel(risk) {
+    if (!risk) return '<div class="report-na">Not available</div>';
+    let html = '';
+    if (risk.overall_assessment) {
+      html += _card('Overall Assessment', '<p class="rpt-p">' + _escHtml(risk.overall_assessment) + '</p>');
+    }
+    if (risk.fire_behaviour) {
+      html += _card('Fire Behaviour', '<p class="rpt-p">' + _escHtml(risk.fire_behaviour) + '</p>');
+    }
+    if (risk.growth_trajectory) {
+      html += _card('Growth Trajectory', '<p class="rpt-p">' + _escHtml(risk.growth_trajectory) + '</p>');
+    }
+    if (risk.weather_drivers) {
+      html += _card('Weather Drivers', '<p class="rpt-p">' + _escHtml(risk.weather_drivers) + '</p>');
+    }
+    if (risk.risk_factors && risk.risk_factors.length) {
+      html += _card('Risk Factors', _tagList(risk.risk_factors));
+    }
+    return html || '<div class="report-na">Not available</div>';
+  }
+
+  function _renderImpactPanel(impact) {
+    if (!impact) return '<div class="report-na">Not available</div>';
+    let html = '';
+
+    // Population counts
+    const pop = impact.population || {};
+    if (Object.keys(pop).length) {
+      let popHtml = '';
+      if (pop.within_perimeter != null) popHtml += _kv('Within perimeter', pop.within_perimeter.toLocaleString());
+      if (pop.at_risk_3h  != null) popHtml += _kv('At risk +3h',  pop.at_risk_3h.toLocaleString());
+      if (pop.at_risk_6h  != null) popHtml += _kv('At risk +6h',  pop.at_risk_6h.toLocaleString());
+      if (pop.at_risk_12h != null) popHtml += _kv('At risk +12h', pop.at_risk_12h.toLocaleString());
+      if (popHtml) html += _card('Population Exposure', popHtml);
+    }
+
+    // Communities
+    if (impact.communities_affected && impact.communities_affected.length) {
+      const rows = impact.communities_affected.map(function(c) {
+        const sev = c.severity ? '<span class="rpt-tag sev-' + c.severity + '">' + c.severity + '</span>' : '';
+        return '<div class="rpt-community">' +
+          '<span class="rpt-community-name">' + _escHtml(c.name || '') + '</span>' + sev +
+          (c.exposure ? '<span class="rpt-community-desc">' + _escHtml(c.exposure) + '</span>' : '') +
+          '</div>';
+      }).join('');
+      html += _card('Communities Affected', rows);
+    }
+
+    if (impact.impact_summary) {
+      html += _card('Impact Summary', '<p class="rpt-p">' + _escHtml(impact.impact_summary) + '</p>');
+    }
+
+    if (impact.worsening_factors && impact.worsening_factors.length) {
+      html += _card('Worsening Factors', _tagList(impact.worsening_factors));
+    }
+
+    return html || '<div class="report-na">Not available</div>';
+  }
+
+  function _renderEvacPanel(evac) {
+    if (!evac) return '<div class="report-na">Not available</div>';
+    let html = '';
+
+    function _routeCard(title, route) {
+      if (!route) return '';
+      let inner = '';
+      if (route.path && route.path.length) {
+        inner += '<div class="rpt-route-path">' +
+          route.path.map(function(s) { return '<span class="rpt-waypoint">' + _escHtml(s) + '</span>'; }).join('<span class="rpt-arrow">→</span>') +
+          '</div>';
+      }
+      if (route.status)    inner += _kv('Status',    route.status);
+      if (route.window)    inner += _kv('Window',    route.window);
+      if (route.reasoning) inner += '<p class="rpt-p rpt-reasoning">' + _escHtml(route.reasoning) + '</p>';
+      return _card(title, inner);
+    }
+
+    html += _routeCard('Top Route', evac.top_route);
+    html += _routeCard('Alternative Route', evac.alternative_route);
+
+    if (evac.road_warnings && evac.road_warnings.length) {
+      html += _card('Road Warnings', _tagList(evac.road_warnings));
+    }
+
+    return html || '<div class="report-na">Not available</div>';
+  }
+
+  function _renderCrowdPanel(crowd) {
+    if (!crowd) return '<div class="report-na">Not available</div>';
+    let html = '';
+
+    // Report counts
+    const counts = crowd.report_counts || {};
+    if (counts.total) {
+      let countsHtml = '';
+      countsHtml += _kv('Total reports', counts.total);
+      if (counts.fire_report)   countsHtml += _kv('Fire reports',    counts.fire_report);
+      if (counts.info)          countsHtml += _kv('Info reports',    counts.info);
+      if (counts.request_help)  countsHtml += _kv('Help requests',   counts.request_help);
+      if (counts.need_help)     countsHtml += _kv('Urgent help',     counts.need_help);
+      if (counts.offer_help)    countsHtml += _kv('Offers of help',  counts.offer_help);
+      html += _card('Signal Summary', countsHtml);
+    }
+
+    if (crowd.urgent_help && crowd.urgent_help.length) {
+      const urgentHtml = crowd.urgent_help.map(function(s) {
+        return '<div class="rpt-urgent-item">⚠ ' + _escHtml(s) + '</div>';
+      }).join('');
+      html += _card('Urgent Help Requests', urgentHtml);
+    }
+
+    if (crowd.fire_observations && !/No crowd reports/i.test(crowd.fire_observations)) {
+      html += _card('Fire Observations', '<p class="rpt-p">' + _escHtml(crowd.fire_observations) + '</p>');
+    }
+
+    if (crowd.situational_info) {
+      html += _card('Situational Information', '<p class="rpt-p">' + _escHtml(crowd.situational_info) + '</p>');
+    }
+
+    if (crowd.notable_patterns) {
+      html += _card('Notable Patterns', '<p class="rpt-p">' + _escHtml(crowd.notable_patterns) + '</p>');
+    }
+
+    if (!html) {
+      html = '<div class="report-na">No crowd reports available for this timestep.</div>';
+    }
+
+    return html;
   }
 
   function _renderOverviewPanel(report) {
@@ -224,7 +450,7 @@
         '</div>';
     }
 
-    // Key points cards
+    // Key points
     if (report.key_points && report.key_points.length) {
       html += '<div class="report-key-points">' +
         '<div class="kp-title">Key Points</div>' +
@@ -235,13 +461,62 @@
         '</ul></div>';
     }
 
-    // Briefing text
-    const text = report.situation_overview;
-    if (text) {
-      if (report.key_points && report.key_points.length) {
-        html += '<div class="report-briefing-label">Full Briefing</div>';
+    // Stat tiles — pulled from structured specialist data
+    const tiles = [];
+
+    const impact = report.impact || {};
+    const pop = impact.population || {};
+    const atRisk12 = pop.at_risk_12h;
+    if (atRisk12 != null) {
+      tiles.push({ icon: '👥', label: 'At risk +12h', value: Number(atRisk12).toLocaleString() });
+    }
+    if (pop.within_perimeter != null) {
+      tiles.push({ icon: '🔥', label: 'Within perimeter', value: Number(pop.within_perimeter).toLocaleString() });
+    }
+
+    const evac = report.evacuation || {};
+    if (evac.top_route && evac.top_route.window) {
+      tiles.push({ icon: '🛣', label: 'Top route window', value: evac.top_route.window });
+    } else if (evac.top_route && evac.top_route.path && evac.top_route.path.length) {
+      tiles.push({ icon: '🛣', label: 'Top route', value: evac.top_route.path[0] + ' → ' + evac.top_route.path[evac.top_route.path.length - 1] });
+    }
+
+    const crowd = report.crowd;
+    if (crowd && crowd.report_counts) {
+      const total = crowd.report_counts.total || 0;
+      const urgent = crowd.report_counts.need_help || 0;
+      const label = urgent ? total + ' reports (' + urgent + ' urgent)' : total + ' reports';
+      tiles.push({ icon: '📍', label: 'Crowd reports', value: label });
+    }
+
+    if (tiles.length) {
+      html += '<div class="ov-stat-row">' +
+        tiles.map(function(t) {
+          return '<div class="ov-stat-tile">' +
+            '<span class="ov-stat-icon">' + t.icon + '</span>' +
+            '<span class="ov-stat-val">' + _escHtml(t.value) + '</span>' +
+            '<span class="ov-stat-label">' + _escHtml(t.label) + '</span>' +
+            '</div>';
+        }).join('') +
+        '</div>';
+    }
+
+    // Briefing sections
+    const hasBriefing = report.situation || report.key_risks || report.immediate_actions;
+    if (hasBriefing) {
+      html += '<div class="report-briefing-label"><span class="briefing-line"></span><span class="briefing-title">Briefing</span><span class="briefing-line"></span></div>';
+      // If only situation is filled (LLM returned full text in one field), label it generically
+      const threeFields = report.key_risks || report.immediate_actions;
+      if (report.situation) {
+        html += _card(threeFields ? 'Situation' : 'Executive Briefing',
+          '<p class="rpt-p">' + _escHtml(report.situation) + '</p>');
       }
-      html += '<div class="report-section-card"><div class="report-text">' + _fmt(text) + '</div></div>';
+      if (report.key_risks) {
+        html += _card('Key Risks', '<p class="rpt-p">' + _escHtml(report.key_risks) + '</p>');
+      }
+      if (report.immediate_actions) {
+        html += _card('Immediate Actions', '<p class="rpt-p">' + _escHtml(report.immediate_actions) + '</p>');
+      }
     }
 
     return html || '<div class="report-na">Not available</div>';
@@ -257,10 +532,12 @@
   function _renderInitialSuggestions() {
     const msgs = document.getElementById('chat-messages');
     if (!msgs) return;
+    const qs = _reportData ? _generateInitialQuestions(_reportData) : [];
+    if (!qs.length) return;
     const div = document.createElement('div');
     div.className = 'suggested-qs initial-qs';
     div.innerHTML = '<div class="sq-label">Suggested questions</div>' +
-      INITIAL_QUESTIONS.map(function(q) {
+      qs.map(function(q) {
         return '<button class="sq-btn" onclick="window.__askQ(this)">' + _escHtml(q) + '</button>';
       }).join('');
     msgs.appendChild(div);
@@ -271,10 +548,72 @@
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   }
 
+  function _fmtInline(s) {
+    return s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  }
+
   function _fmt(text) {
-    return _escHtml(text)
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      .replace(/\n/g, '<br>');
+    const lines = text.split('\n');
+    let html = '';
+    let firstHead = true;
+
+    for (let i = 0; i < lines.length; i++) {
+      const raw  = lines[i];
+      const line = raw.trim();
+      const esc  = _escHtml(line);
+
+      if (!line) {
+        html += '<div class="rpt-spacer"></div>';
+        continue;
+      }
+
+      // ALL-CAPS standalone line → section header (TOP ROUTE, ALTERNATIVE ROUTE, etc.)
+      if (/^[A-Z][A-Z\s\-]{3,}$/.test(line)) {
+        const mt = firstHead ? ' rpt-head-first' : '';
+        html += '<div class="rpt-section-head' + mt + '">' + esc + '</div>';
+        firstHead = false;
+        continue;
+      }
+
+      // "Situation →", "Key Risks →", "Immediate Actions →"
+      const arrowMatch = line.match(/^([A-Z][^→\n]{2,30})\s*→\s*(.*)/);
+      if (arrowMatch) {
+        const mt = firstHead ? ' rpt-head-first' : '';
+        html += '<div class="rpt-section-head' + mt + '">' + _escHtml(arrowMatch[1].trim()) + '</div>';
+        firstHead = false;
+        if (arrowMatch[2].trim()) {
+          html += '<p class="rpt-p">' + _fmtInline(_escHtml(arrowMatch[2].trim())) + '</p>';
+        }
+        continue;
+      }
+
+      // "- Key: value" key-value row
+      const kvMatch = line.match(/^[-•]\s*([A-Za-z][A-Za-z\s]{1,20}):\s+(.*)/);
+      if (kvMatch) {
+        html += '<div class="rpt-kv">' +
+          '<span class="rpt-key">' + _escHtml(kvMatch[1]) + '</span>' +
+          '<span class="rpt-val">' + _fmtInline(_escHtml(kvMatch[2])) + '</span>' +
+          '</div>';
+        continue;
+      }
+
+      // "- bullet" / "• bullet"
+      if (/^[-•]\s+/.test(line)) {
+        html += '<div class="rpt-bullet">▸ ' + _fmtInline(esc.replace(/^[-•]\s+/, '')) + '</div>';
+        continue;
+      }
+
+      // Numbered list "1. ..."
+      if (/^\d+\.\s+/.test(line)) {
+        html += '<div class="rpt-bullet">' + _fmtInline(esc) + '</div>';
+        continue;
+      }
+
+      // Normal paragraph
+      html += '<p class="rpt-p">' + _fmtInline(esc) + '</p>';
+    }
+
+    return html;
   }
 
   function _renderMsg(text) {

@@ -15,19 +15,6 @@
     return Number(val).toLocaleString();
   }
 
-  function windArrow(deg) {
-    if (deg == null) return '';
-    return '<svg width="26" height="26" viewBox="-13 -13 26 26" style="vertical-align:middle;flex-shrink:0">' +
-      '<g transform="rotate(' + (deg + 180) + ')">' +
-      '<polygon points="0,-9 3.5,5 0,2.5 -3.5,5" fill="#ff8c00"/>' +
-      '</g></svg>';
-  }
-
-  function windDirLabel(deg) {
-    if (deg == null) return '';
-    return ['N','NE','E','SE','S','SW','W','NW'][Math.round(deg / 45) % 8];
-  }
-
   function fwiBar(label, value, max, color) {
     const pct = (value != null) ? Math.min(100, (value / max) * 100).toFixed(0) : 0;
     const display = (value != null) ? Number(value).toFixed(1) : '—';
@@ -67,10 +54,9 @@
     if (!el) return;
 
     // Safely extract nested data
-    const fire = (fireCtx && fireCtx.fire)       || {};
-    const wx   = (fireCtx && fireCtx.weather_t1) || {};
-    const fwi  = (fireCtx && fireCtx.fwi_t1)     || {};
-    const wf   = weatherForecast                  || [];   // from weather/forecast.json
+    const fire = (fireCtx && fireCtx.fire)   || {};
+    const fwi  = (fireCtx && fireCtx.fwi_t1) || {};
+    const wf   = weatherForecast             || [];   // from weather/forecast.json
     const pop  = analysis || {};
 
     // Validate we have some real data
@@ -80,6 +66,14 @@
     }
 
     el.innerHTML =
+
+      // ── Weather (updates with Forecast Horizon slider) ──
+      '<div class="dash-card">' +
+        '<div class="dash-card-title">Weather</div>' +
+        '<div id="fcast-weather" class="fcast-weather">' +
+          '<span style="opacity:.4;font-size:10px">Loading…</span>' +
+        '</div>' +
+      '</div>' +
 
       // ── Population ──
       '<div class="dash-card">' +
@@ -110,22 +104,6 @@
         '</table>' +
       '</div>' +
 
-      // ── Weather ──
-      '<div class="dash-card">' +
-        '<div class="dash-card-title">Weather</div>' +
-        '<div class="weather-big">' +
-          windArrow(wx.wind_dir) +
-          '<span class="wind-speed">' + (wx.wind_speed_kmh != null ? wx.wind_speed_kmh.toFixed(1) : '—') + '</span>' +
-          '<span class="wind-unit"> km/h</span>' +
-          '<span class="wind-dir-label"> ' + windDirLabel(wx.wind_dir) + '</span>' +
-        '</div>' +
-        '<table class="stat-table">' +
-          '<tr><td>Temp</td><td>'  + v(wx.temp_c, 1, '°C') + '</td></tr>' +
-          '<tr><td>RH</td><td>'    + v(wx.rh, 1, '%')       + '</td></tr>' +
-          '<tr><td>Dir</td><td>'   + (wx.wind_dir != null ? wx.wind_dir.toFixed(0) + '° ' + windDirLabel(wx.wind_dir) : '—') + '</td></tr>' +
-        '</table>' +
-      '</div>' +
-
       // ── FWI ──
       '<div class="dash-card">' +
         '<div class="dash-card-title">FWI</div>' +
@@ -141,6 +119,51 @@
       '<div class="dash-card dash-card-wide">' +
         '<div class="dash-card-title">Wind Forecast +12h</div>' +
         '<div id="dash-wind-sparkline">' + windSparkline(wf) + '</div>' +
+        '<div id="dash-wind-labels" class="forecast-labels">' +
+          wf.filter((_, i) => i % 3 === 0).map(f => {
+            const spd = (f.wind_speed_kmh || f.speed_kmh);
+            const max = f.max_wind_speed_kmh;
+            return '<span>+' + f.hour + 'h<br><b>' + (spd != null ? spd.toFixed(0) : '—') + '</b>' +
+              (max != null ? '<br><small style="opacity:.55">↑' + max.toFixed(0) + '</small>' : '') + '</span>';
+          }).join('') +
+        '</div>' +
+      '</div>';
+  }
+
+  // Pending state: weather/wind forecast shown immediately;
+  // prediction-dependent cards show a spinner until Stage 1 completes.
+  function renderDashboardPending(weatherForecast) {
+    const el = document.getElementById('dashboard-content');
+    if (!el) return;
+    const wf = weatherForecast || [];
+
+    const loadingCard = function(title) {
+      return '<div class="dash-card">' +
+        '<div class="dash-card-title">' + title + '</div>' +
+        '<div class="dash-card-loading"><div class="dash-loading-spinner"></div>Building prediction…</div>' +
+      '</div>';
+    };
+
+    el.innerHTML =
+
+      // Weather — available immediately from ERA5 (same element as Forecast Horizon)
+      '<div class="dash-card">' +
+        '<div class="dash-card-title">Weather</div>' +
+        '<div id="fcast-weather" class="fcast-weather">' +
+          (wf.length ? '' : '<span style="opacity:.4;font-size:10px">Loading…</span>') +
+        '</div>' +
+      '</div>' +
+
+      loadingCard('Population') +
+      loadingCard('Fire') +
+      loadingCard('FWI') +
+
+      // Wind Forecast — available immediately from ERA5
+      '<div class="dash-card dash-card-wide">' +
+        '<div class="dash-card-title">Wind Forecast +12h</div>' +
+        '<div id="dash-wind-sparkline">' +
+          (wf.length ? windSparkline(wf) : '<span style="opacity:.4;font-size:10px">Loading…</span>') +
+        '</div>' +
         '<div id="dash-wind-labels" class="forecast-labels">' +
           wf.filter((_, i) => i % 3 === 0).map(f => {
             const spd = (f.wind_speed_kmh || f.speed_kmh);
@@ -171,5 +194,5 @@
     }).join('');
   }
 
-  window.Dashboard = { renderDashboard, clearDashboard, updateWeather };
+  window.Dashboard = { renderDashboard, renderDashboardPending, clearDashboard, updateWeather };
 })();

@@ -8,7 +8,7 @@ Entry point: build_env()
 """
 
 from pipeline.db    import setup_db
-from pipeline.check import run_checks, build_playback_events, build_realtime_events
+from pipeline.check import run_checks, build_playback_events
 
 
 def build_env(app) -> None:
@@ -23,7 +23,6 @@ def build_env(app) -> None:
     print("=== Building event data ===")
     with app.app_context():
         build_playback_events()
-        build_realtime_events()
 
     print("=== Environment check ===")
     run_checks(app)

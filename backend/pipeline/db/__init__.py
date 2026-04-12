@@ -11,8 +11,6 @@ from __future__ import annotations
 # Canonical column set for event_timesteps — drop & recreate if stale.
 _REQUIRED_COLS = {
     "id", "event_id", "slot_time", "nearest_t1", "gap_hours", "data_gap_warn",
-    "prediction_status", "spatial_analysis_status",
-    "affected_population", "at_risk_3h", "at_risk_6h", "at_risk_12h",
     "created_at",
 }
 
@@ -25,7 +23,70 @@ def setup_db(app) -> None:
     with app.app_context():
         _migrate_event_timesteps(db)
         db.create_all()
+        _migrate_field_reports(db)
+        _migrate_users(db)
+        _migrate_fire_events(db)
         seed_db()
+
+
+def _migrate_field_reports(db) -> None:
+    """Add new columns to field_reports if they are missing (safe, additive migration)."""
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(db.engine)
+    if "field_reports" not in inspector.get_table_names():
+        return  # table doesn't exist yet — create_all() will handle it
+
+    existing = {col["name"] for col in inspector.get_columns("field_reports")}
+    new_cols = {
+        "like_count": "INTEGER NOT NULL DEFAULT 0",
+        "flag_count":  "INTEGER NOT NULL DEFAULT 0",
+    }
+    with db.engine.connect() as conn:
+        for col, definition in new_cols.items():
+            if col not in existing:
+                print(f"[db] field_reports: adding column {col}")
+                conn.execute(text(f"ALTER TABLE field_reports ADD COLUMN {col} {definition}"))
+        conn.commit()
+
+    # field_report_comments.like_count
+    if "field_report_comments" in inspector.get_table_names():
+        comment_cols = {col["name"] for col in inspector.get_columns("field_report_comments")}
+        if "like_count" not in comment_cols:
+            print("[db] field_report_comments: adding column like_count")
+            with db.engine.connect() as conn:
+                conn.execute(text("ALTER TABLE field_report_comments ADD COLUMN like_count INTEGER NOT NULL DEFAULT 0"))
+                conn.commit()
+
+
+def _migrate_users(db) -> None:
+    """Add is_admin column to users table if missing."""
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(db.engine)
+    if "users" not in inspector.get_table_names():
+        return
+    existing = {col["name"] for col in inspector.get_columns("users")}
+    if "is_admin" not in existing:
+        print("[db] users: adding column is_admin")
+        with db.engine.connect() as conn:
+            conn.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT FALSE"))
+            conn.commit()
+
+
+def _migrate_fire_events(db) -> None:
+    """Add replay_ms column to fire_events if missing."""
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(db.engine)
+    if "fire_events" not in inspector.get_table_names():
+        return
+    existing = {col["name"] for col in inspector.get_columns("fire_events")}
+    if "replay_ms" not in existing:
+        print("[db] fire_events: adding column replay_ms")
+        with db.engine.connect() as conn:
+            conn.execute(text("ALTER TABLE fire_events ADD COLUMN replay_ms BIGINT"))
+            conn.commit()
 
 
 def _migrate_event_timesteps(db) -> None:

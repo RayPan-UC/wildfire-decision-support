@@ -24,7 +24,7 @@ _REQUIRED_MODELS = [
     "model_full_thresholds.json",
 ]
 
-from pipeline.check.builder import build_playback_events, build_realtime_events
+from pipeline.check.builder import build_playback_events
 
 
 def run_checks(app) -> None:

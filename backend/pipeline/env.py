@@ -19,8 +19,9 @@ _DATA_DIR   = Path(__file__).resolve().parents[2] / "data"
 _MODELS_DIR = _DATA_DIR / "static" / "models"
 
 _STATIC_FILES = {
-    "population.gpkg":   "https://zenodo.org/records/19434352/files/population.gpkg?download=1",
-    "roads_canada.gpkg": "https://zenodo.org/records/19436338/files/roads_canada.gpkg?download=1",
+    "population.gpkg":                         "https://zenodo.org/records/19434352/files/population.gpkg?download=1",
+    "roads_canada.gpkg":                       "https://zenodo.org/records/19436338/files/roads_canada.gpkg?download=1",
+    "actual_perimeter/actual_perimeter.gpkg":  "https://zenodo.org/records/19502692/files/actual_perimeter.gpkg?download=1",
 }
 
 
@@ -335,6 +336,7 @@ def _download_static_gpkg() -> None:
 
     for filename, url in _STATIC_FILES.items():
         dest = static_dir / filename
+        dest.parent.mkdir(parents=True, exist_ok=True)
         if dest.exists():
             print(f"[env] {filename} — already exists, skip")
             continue

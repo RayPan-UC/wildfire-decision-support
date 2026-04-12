@@ -1,15 +1,16 @@
 """
 pipeline/predict/prediction.py
 -------------------------------
-Stage 1: Run ML prediction for one timestep → write GeoJSON files.
+Stage 2 (ML): Run ML prediction for one timestep → write GeoJSON files.
 
-Outputs (under out_dir/):
-    perimeter.geojson
-    hotspots.geojson
+Outputs (under out_dir = prediction/ML/):
     risk_zones_3h.geojson
     risk_zones_6h.geojson
     risk_zones_12h.geojson
     fire_context.json
+
+Perimeter and hotspots are written by Stage 1 (_run_perimeter_stage)
+to perimeter/perimeter.geojson and hotspot/hotspots.geojson.
 """
 
 from __future__ import annotations
@@ -81,18 +82,6 @@ def run_prediction(
                             encoding="utf-8")
         log.info("[prediction] ts=%d fire_context.json written", ts_id)
 
-    # ── Perimeter ─────────────────────────────────────────────────────────────
-    perimeter_path = out_dir / "perimeter.geojson"
-    if not perimeter_path.exists():
-        _export_perimeter(fire_state, t1, perimeter_path)
-        log.info("[prediction] ts=%d perimeter exported", ts_id)
-
-    # ── Hotspots ──────────────────────────────────────────────────────────────
-    hotspots_path = out_dir / "hotspots.geojson"
-    if not hotspots_path.exists():
-        _export_hotspots(study, t1, hotspots_path)
-        log.info("[prediction] ts=%d hotspots exported", ts_id)
-
     return intermediates
 
 
@@ -135,7 +124,14 @@ def _export_hotspots(study, t1: pd.Timestamp, out_path: Path) -> None:
 
     hs_df = pd.read_parquet(study.data_processed_dir / "firms" / "hotspots.parquet")
     hs_df["overpass_time"] = pd.to_datetime(hs_df["overpass_time"])
-    subset = hs_df[hs_df["overpass_time"] == t1]
+    subset = hs_df[hs_df["overpass_time"] == t1].copy()
+
+    # Filter out low-confidence detections (VIIRS 'l' = <30% confidence)
+    # and zero-FRP points (not genuine fire radiative power)
+    if "confidence" in subset.columns:
+        subset = subset[subset["confidence"].astype(str).str.lower() != "l"]
+    if "frp" in subset.columns:
+        subset = subset[subset["frp"].fillna(0) > 0]
 
     transformer = pyproj.Transformer.from_crs("EPSG:3978", "EPSG:4326", always_xy=True)
     features = []

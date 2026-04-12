@@ -1,20 +1,16 @@
 """
 api/timesteps.py
 ----------------
-All per-timestep endpoints.
+Core blueprint, shared helpers, control endpoints, and chat.
 
-Routes (registered under /api):
+Routes:
     GET  /events/<id>/timesteps
-    GET  /events/<id>/timesteps/<ts_id>/perimeter
-    GET  /events/<id>/timesteps/<ts_id>/hotspots
-    GET  /events/<id>/timesteps/<ts_id>/risk-zones
-    GET  /events/<id>/timesteps/<ts_id>/roads
-    GET  /events/<id>/timesteps/<ts_id>/population
-    GET  /events/<id>/timesteps/<ts_id>/weather           ← ERA5 +12h area-avg forecast
-    GET  /events/<id>/timesteps/<ts_id>/wind-field?hour=N ← leaflet-velocity wind field
-    GET  /events/<id>/timesteps/<ts_id>/fire-context
-    POST /events/<id>/timesteps/<ts_id>/report      ← on-demand AI report
+    GET  /events/<id>/timesteps/<ts_id>/status
+    POST /events/<id>/timesteps/<ts_id>/run-prediction   body: {force?: bool}
     POST /events/<id>/chat
+
+Prediction/weather/spatial/report routes are registered by importing
+the sub-modules at the bottom of this file.
 """
 
 from __future__ import annotations
@@ -22,7 +18,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from flask import Blueprint, Response, jsonify, request, stream_with_context
+from flask import Blueprint, Response, current_app, jsonify, request, stream_with_context
 from utils.auth_middleware import token_required
 
 timesteps_bp = Blueprint("timesteps", __name__)
@@ -30,22 +26,69 @@ timesteps_bp = Blueprint("timesteps", __name__)
 _DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 
 
-# ── Path helpers ──────────────────────────────────────────────────────────────
+# ── Shared path helpers ───────────────────────────────────────────────────────
+
+def _ts_base(event_id: int, year: int, slot_time) -> Path:
+    import pandas as pd
+    ts_str = pd.Timestamp(slot_time).strftime("%Y-%m-%dT%H%M")
+    return _DATA_DIR / "events" / f"{year}_{event_id:04d}" / "timesteps" / ts_str
+
 
 def _pred_dir(event_id: int, year: int, slot_time) -> Path:
-    import pandas as pd
-    ts_str = pd.Timestamp(slot_time).strftime("%Y-%m-%dT%H%M")
-    return _DATA_DIR / "events" / f"{year}_{event_id:04d}" / "timesteps" / ts_str / "prediction"
+    """Returns prediction/ML/ — where ML risk-zone outputs live."""
+    return _ts_base(event_id, year, slot_time) / "prediction" / "ML"
 
 
-def _spatial_dir(event_id: int, year: int, slot_time) -> Path:
-    import pandas as pd
-    ts_str = pd.Timestamp(slot_time).strftime("%Y-%m-%dT%H%M")
-    return _DATA_DIR / "events" / f"{year}_{event_id:04d}" / "timesteps" / ts_str / "spatial_analysis"
+def _perim_dir(event_id: int, year: int, slot_time) -> Path:
+    return _ts_base(event_id, year, slot_time) / "perimeter"
+
+
+def _hotspot_dir(event_id: int, year: int, slot_time) -> Path:
+    return _ts_base(event_id, year, slot_time) / "hotspot"
+
+
+def _actual_perim_dir(event_id: int, year: int, slot_time) -> Path:
+    return _ts_base(event_id, year, slot_time) / "actual_perimeter"
+
+
+_SENTINEL = {
+    # status_dir suffix → file that proves the stage completed without STATUS.json
+    "ML":               "fire_context.json",
+    "wind_driven":      "STATUS.json",          # no sentinel yet; always needs STATUS.json
+    "spatial_analysis": "ML/roads.geojson",
+}
+
+def _read_status(status_dir: Path) -> str:
+    """Read status, checking in-memory running set first, then STATUS.json, then sentinels."""
+    from pipeline.check.builder_slots import _read_status as _slots_read_status, _write_status as _slots_write_status
+    # Check in-memory running first
+    from pipeline.check.builder_slots import _running, _running_lock
+    with _running_lock:
+        if str(status_dir) in _running:
+            return "running"
+
+    path = status_dir / "STATUS.json"
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8")).get("status", "pending")
+        except Exception:
+            return "pending"
+
+    # STATUS.json missing — check sentinel file to handle pre-STATUS.json runs
+    sentinel_name = _SENTINEL.get(status_dir.name)
+    if sentinel_name and (status_dir / sentinel_name).exists():
+        _write_status(status_dir, "done")
+        return "done"
+
+    return "pending"
+
+
+def _write_status(status_dir: Path, status: str) -> None:
+    from pipeline.check.builder_slots import _write_status as _slots_write_status
+    _slots_write_status(status_dir, status)
 
 
 def _get_event_and_ts(event_id: int, ts_id: int):
-    """Load FireEvent + EventTimestep, or return (None, error_response)."""
     from db.models import FireEvent, EventTimestep
     event = FireEvent.query.get(event_id)
     if not event:
@@ -68,7 +111,7 @@ def _read_json(path: Path) -> dict:
     return {}
 
 
-# ── Routes ────────────────────────────────────────────────────────────────────
+# ── List timesteps ────────────────────────────────────────────────────────────
 
 @timesteps_bp.route("/events/<int:event_id>/timesteps", methods=["GET"])
 @token_required
@@ -77,265 +120,237 @@ def list_timesteps(event_id: int):
     event = FireEvent.query.get(event_id)
     if not event:
         return jsonify({"error": "event not found"}), 404
-
     rows = (
         EventTimestep.query
         .filter_by(event_id=event_id)
         .order_by(EventTimestep.slot_time)
         .all()
     )
-    return jsonify([{
-        "id":                      ts.id,
-        "slot_time":               ts.slot_time.isoformat(),
-        "nearest_t1":              ts.nearest_t1.isoformat(),
-        "gap_hours":               ts.gap_hours,
-        "data_gap_warn":           ts.data_gap_warn,
-        "prediction_status":       ts.prediction_status,
-        "spatial_analysis_status": ts.spatial_analysis_status,
-    } for ts in rows]), 200
+    result = []
+    for ts in rows:
+        base     = _ts_base(event.id, event.year, ts.slot_time)
+        ml_st    = _read_status(base / "prediction" / "ML")
+        wd_st    = _read_status(base / "prediction" / "wind_driven")
+        sp_st    = _read_status(base / "spatial_analysis")
+        result.append({
+            "id":                      ts.id,
+            "slot_time":               ts.slot_time.isoformat(),
+            "nearest_t1":              ts.nearest_t1.isoformat(),
+            "gap_hours":               ts.gap_hours,
+            "data_gap_warn":           ts.data_gap_warn,
+            "prediction_status":       ml_st,
+            "spatial_analysis_status": sp_st,
+            "wind_driven_status":      wd_st,
+        })
+    return jsonify(result), 200
 
 
-@timesteps_bp.route("/events/<int:event_id>/timesteps/<int:ts_id>/perimeter", methods=["GET"])
+# ── Status + run-prediction ───────────────────────────────────────────────────
+
+def _reset_ts_if_files_missing(event, ts) -> bool:
+    """Reset ML status to 'pending' if STATUS.json says done but perimeter.geojson is gone."""
+    base     = _ts_base(event.id, event.year, ts.slot_time)
+    ml_dir   = base / "prediction" / "ML"
+    ml_st    = _read_status(ml_dir)
+    if ml_st not in ("done", "failed"):
+        return False
+    sentinel = ml_dir / "fire_context.json"
+    if sentinel.exists():
+        return False
+    _write_status(ml_dir, "pending")
+    _write_status(base / "spatial_analysis", "pending")
+    return True
+
+
+@timesteps_bp.route("/events/<int:event_id>/timesteps/<int:ts_id>/status", methods=["GET"])
 @token_required
-def get_perimeter(event_id: int, ts_id: int):
+def get_ts_status(event_id: int, ts_id: int):
     result, err = _get_event_and_ts(event_id, ts_id)
     if err:
         return err
     event, ts = result
-    return jsonify(_read_geojson(_pred_dir(event.id, event.year, ts.slot_time) / "perimeter.geojson")), 200
-
-
-@timesteps_bp.route("/events/<int:event_id>/timesteps/<int:ts_id>/hotspots", methods=["GET"])
-@token_required
-def get_hotspots(event_id: int, ts_id: int):
-    result, err = _get_event_and_ts(event_id, ts_id)
-    if err:
-        return err
-    event, ts = result
-    return jsonify(_read_geojson(_pred_dir(event.id, event.year, ts.slot_time) / "hotspots.geojson")), 200
-
-
-@timesteps_bp.route("/events/<int:event_id>/timesteps/<int:ts_id>/risk-zones", methods=["GET"])
-@token_required
-def get_risk_zones(event_id: int, ts_id: int):
-    """Return all 3 horizons combined as one FeatureCollection."""
-    result, err = _get_event_and_ts(event_id, ts_id)
-    if err:
-        return err
-    event, ts = result
-    pred = _pred_dir(event.id, event.year, ts.slot_time)
-
-    features = []
-    for h in ("3h", "6h", "12h"):
-        fc = _read_geojson(pred / f"risk_zones_{h}.geojson")
-        features.extend(fc.get("features", []))
-
-    return jsonify({"type": "FeatureCollection", "features": features}), 200
-
-
-@timesteps_bp.route("/events/<int:event_id>/timesteps/<int:ts_id>/roads", methods=["GET"])
-@token_required
-def get_roads(event_id: int, ts_id: int):
-    """Return roads.geojson — major roads with status (burned/at_risk_Xh/clear)
-    and cut_at/cut_location for threatened segments."""
-    result, err = _get_event_and_ts(event_id, ts_id)
-    if err:
-        return err
-    event, ts = result
-    path = _spatial_dir(event.id, event.year, ts.slot_time) / "roads.geojson"
-    return jsonify(_read_geojson(path)), 200
-
-
-@timesteps_bp.route("/events/<int:event_id>/timesteps/<int:ts_id>/population", methods=["GET"])
-@token_required
-def get_population(event_id: int, ts_id: int):
-    """Return population counts from DB."""
-    result, err = _get_event_and_ts(event_id, ts_id)
-    if err:
-        return err
-    _, ts = result
+    _reset_ts_if_files_missing(event, ts)
+    base = _ts_base(event.id, event.year, ts.slot_time)
     return jsonify({
-        "affected_population": ts.affected_population,
-        "at_risk_3h":          ts.at_risk_3h,
-        "at_risk_6h":          ts.at_risk_6h,
-        "at_risk_12h":         ts.at_risk_12h,
-    }), 200
+        "prediction_status":        _read_status(base / "prediction" / "ML"),
+        "spatial_analysis_status":  _read_status(base / "spatial_analysis"),
+        "wind_driven_status":       _read_status(base / "prediction" / "wind_driven"),
+        "crowd_prediction_status":  _read_status(base / "prediction" / "ML_crowd"),
+        "spatial_crowd_status":     _read_status(base / "spatial_analysis_crowd"),
+    })
 
 
-def _weather_dir(event_id: int, year: int, slot_time) -> Path:
-    import pandas as pd
-    ts_str = pd.Timestamp(slot_time).strftime("%Y-%m-%dT%H%M")
-    return _DATA_DIR / "events" / f"{year}_{event_id:04d}" / "timesteps" / ts_str / "weather"
-
-
-@timesteps_bp.route("/events/<int:event_id>/timesteps/<int:ts_id>/weather", methods=["GET"])
+@timesteps_bp.route("/events/<int:event_id>/timesteps/<int:ts_id>/run-prediction", methods=["POST"])
 @token_required
-def get_weather(event_id: int, ts_id: int):
-    """Return hourly ERA5 area-average forecast for +12h.
+def run_prediction(event_id: int, ts_id: int):
+    """Trigger prediction pipeline.
 
-    Response: [{hour, temp_c, rh, wind_speed_kmh, max_wind_speed_kmh, wind_dir}, ...]
-    """
-    result, err = _get_event_and_ts(event_id, ts_id)
-    if err:
-        return err
-    event, ts = result
-    path = _weather_dir(event.id, event.year, ts.slot_time) / "forecast.json"
-    if not path.exists():
-        return jsonify([]), 200
-    return Response(path.read_text(encoding="utf-8"), mimetype="application/json"), 200
-
-
-@timesteps_bp.route("/events/<int:event_id>/timesteps/<int:ts_id>/wind-field", methods=["GET"])
-@token_required
-def get_wind_field(event_id: int, ts_id: int):
-    """Return leaflet-velocity wind field data.
-
-    Query params:
-        hour (int, 0-12): if given, returns [u_obj, v_obj] for that hour only.
-                          if omitted, returns all hours: [{hour, data:[u,v]}, ...]
-
-    Response (no hour param): [{hour: 0, data: [u_obj, v_obj]}, ...]
-    Response (with hour=N):   [u_component_obj, v_component_obj]
-    """
-    result, err = _get_event_and_ts(event_id, ts_id)
-    if err:
-        return err
-    event, ts = result
-    path = _weather_dir(event.id, event.year, ts.slot_time) / "wind_field.json"
-    if not path.exists():
-        return jsonify([]), 200
-
-    hour_param = request.args.get("hour")
-    if hour_param is None:
-        # Return all hours
-        return Response(path.read_text(encoding="utf-8"), mimetype="application/json"), 200
-
-    try:
-        hour = int(hour_param)
-    except (TypeError, ValueError):
-        hour = 0
-
-    all_hours = json.loads(path.read_text(encoding="utf-8"))
-    entry = next((h for h in all_hours if h["hour"] == hour), None)
-    if entry is None and all_hours:
-        entry = all_hours[0]
-    if entry is None:
-        return jsonify([]), 200
-
-    return jsonify(entry["data"]), 200
-
-
-@timesteps_bp.route("/events/<int:event_id>/timesteps/<int:ts_id>/fire-context", methods=["GET"])
-@token_required
-def get_fire_context(event_id: int, ts_id: int):
-    """Return fire_context.json (fire metrics, weather, FWI, wind forecast, road summary)."""
-    result, err = _get_event_and_ts(event_id, ts_id)
-    if err:
-        return err
-    event, ts = result
-    path = _pred_dir(event.id, event.year, ts.slot_time) / "fire_context.json"
-    if not path.exists():
-        return jsonify({"error": "fire context not yet available"}), 404
-    import re
-    text = re.sub(r'\bNaN\b', 'null', path.read_text(encoding="utf-8"))
-    return Response(text, mimetype="application/json"), 200
-
-
-@timesteps_bp.route("/events/<int:event_id>/timesteps/<int:ts_id>/report", methods=["POST"])
-@token_required
-def generate_report(event_id: int, ts_id: int):
-    """Generate AI situation report on-demand. Returns cached result if available.
-
-    Response:
-        {
-            "situation_overview":  "...",
-            "risk_analysis":       "...",
-            "impact_analysis":     "...",
-            "evacuation_analysis": "..."
-        }
+    Body (optional JSON):
+        { "force": true }          — wipe existing outputs and re-run even if already done.
+        { "crowd": true }          — run crowd-augmented prediction (ML_crowd/).
+        { "crowd": true, "force": true } — wipe crowd outputs and re-run.
     """
     result, err = _get_event_and_ts(event_id, ts_id)
     if err:
         return err
     event, ts = result
 
-    report_path = _spatial_dir(event.id, event.year, ts.slot_time) / "ai_summary.json"
+    body  = request.get_json(silent=True) or {}
+    force = bool(body.get("force"))
+    crowd = bool(body.get("crowd"))
 
-    if report_path.exists():
-        return Response(report_path.read_text(encoding="utf-8"), mimetype="application/json"), 200
+    from utils.background import run_in_background
+    app = current_app._get_current_object()
 
-    fire_context = _read_json(_pred_dir(event.id, event.year, ts.slot_time) / "fire_context.json")
-    if not fire_context:
-        return jsonify({"error": "fire context not available — run prediction first"}), 422
+    # ── Crowd prediction branch ───────────────────────────────────────────────
+    if crowd:
+        base     = _ts_base(event.id, event.year, ts.slot_time)
+        crow_dir = base / "prediction" / "ML_crowd"
+        sp_crowd = base / "spatial_analysis_crowd"
+        crow_st  = _read_status(crow_dir)
 
-    population = {
-        "affected_population": ts.affected_population,
-        "at_risk_3h":          ts.at_risk_3h,
-        "at_risk_6h":          ts.at_risk_6h,
-        "at_risk_12h":         ts.at_risk_12h,
-    }
+        if force and crow_st == "done":
+            import shutil, os, stat
+            def _on_rm_error(func, path, exc_info):
+                try:
+                    os.chmod(path, stat.S_IWRITE)
+                    func(path)
+                except Exception:
+                    pass
+            for d in (crow_dir, sp_crowd):
+                if d.exists():
+                    try:
+                        shutil.rmtree(d, onerror=_on_rm_error)
+                    except Exception:
+                        pass
+            crow_st = "pending"
 
-    from agents import (
-        run_risk_agent, run_impact_agent,
-        run_evacuation_agent, run_summary_agent,
-    )
+        if crow_st == "running":
+            return jsonify({"status": "running"})
 
-    try:
-        summary = {
-            "risk_analysis":       run_risk_agent(fire_context),
-            "impact_analysis":     run_impact_agent(fire_context, population),
-            "evacuation_analysis": run_evacuation_agent(fire_context),
-        }
-        overview = run_summary_agent(
-            summary["risk_analysis"],
-            summary["impact_analysis"],
-            summary["evacuation_analysis"],
-        )
-        summary["situation_overview"] = overview.get("briefing", "")
-        summary["risk_level"]         = overview.get("risk_level", "Unknown")
-        summary["key_points"]         = overview.get("key_points", [])
-    except Exception as e:
-        return jsonify({"error": f"AI agent failed: {e}"}), 502
+        _write_status(crow_dir, "running")
+        from pipeline.check.builder import build_single_timestep_ondemand_crowd
+        run_in_background(build_single_timestep_ondemand_crowd, app, ts_id)
+        return jsonify({"status": "running"})
 
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    return jsonify(summary), 200
+    # ── Standard prediction branch ────────────────────────────────────────────
+    base   = _ts_base(event.id, event.year, ts.slot_time)
+    ml_dir = base / "prediction" / "ML"
+    ml_st  = _read_status(ml_dir)
 
+    if force and ml_st == "done":
+        _wipe_prediction_outputs(event, ts)
+        ml_st = "pending"
+
+    # Auto-heal: STATUS says done but files missing
+    _reset_ts_if_files_missing(event, ts)
+    ml_st = _read_status(ml_dir)
+
+    if ml_st in ("done", "running"):
+        return jsonify({"status": ml_st})
+
+    _write_status(ml_dir, "running")
+
+    from pipeline.check.builder import build_single_timestep_ondemand
+    run_in_background(build_single_timestep_ondemand, app, ts_id)
+    return jsonify({"status": "running"})
+
+
+def _wipe_prediction_outputs(event, ts) -> None:
+    """Delete prediction + spatial_analysis dirs and reset STATUS.json to pending.
+
+    Uses an onerror handler to handle Windows-locked files (OneDrive, Explorer).
+    Falls back to deleting individual files if rmtree still fails.
+    """
+    import os
+    import shutil
+    import stat
+
+    def _on_rm_error(func, path, exc_info):
+        """Make read-only files writable then retry (Windows WinError 5 fix)."""
+        try:
+            os.chmod(path, stat.S_IWRITE)
+            func(path)
+        except Exception:
+            pass  # best-effort; don't crash the endpoint
+
+    base = _ts_base(event.id, event.year, ts.slot_time)
+
+    for sub in ("prediction", "spatial_analysis"):
+        d = base / sub
+        if d.exists():
+            try:
+                shutil.rmtree(d, onerror=_on_rm_error)
+            except Exception:
+                for f in d.rglob("*"):
+                    if f.is_file():
+                        try:
+                            os.chmod(f, stat.S_IWRITE)
+                            f.unlink()
+                        except Exception:
+                            pass
+
+    _write_status(base / "prediction" / "ML", "pending")
+    _write_status(base / "prediction" / "wind_driven", "pending")
+    _write_status(base / "spatial_analysis", "pending")
+
+
+# ── Chat ──────────────────────────────────────────────────────────────────────
 
 @timesteps_bp.route("/events/<int:event_id>/chat", methods=["POST"])
 @token_required
 def chat(event_id: int):
-    """Stateless chat endpoint. Streams response from chat_agent.
-
-    Request body:
-        {
-            "message":     "...",
-            "timestep_id": 42,
-            "history":     [{"role": "user"|"assistant", "content": "..."}]
-        }
-    """
-    body       = request.get_json(force=True)
-    message    = body.get("message", "").strip()
-    ts_id      = body.get("timestep_id")
-    history    = body.get("history", [])
+    body    = request.get_json(force=True)
+    message = body.get("message", "").strip()
+    ts_id   = body.get("timestep_id")
+    history = body.get("history", [])
 
     if not message:
         return jsonify({"error": "message required"}), 400
 
-    summary = ""
+    summary      = ""
     road_summary = []
     if ts_id:
         result, _ = _get_event_and_ts(event_id, ts_id)
         if result:
             event_obj, ts_obj = result
-            ai_data = _read_json(_spatial_dir(event_obj.id, event_obj.year, ts_obj.slot_time) / "ai_summary.json")
-            summary = ai_data.get("situation_overview", "")
-            ctx = _read_json(_pred_dir(event_obj.id, event_obj.year, ts_obj.slot_time) / "fire_context.json")
-            road_summary = ctx.get("road_summary", [])
+            import pandas as _pd
+            ts_str  = _pd.Timestamp(ts_obj.slot_time).strftime("%Y-%m-%dT%H%M")
+            ai_dir  = (_DATA_DIR / "events" / f"{event_obj.year}_{event_obj.id:04d}"
+                       / "timesteps" / ts_str / "AI_report")
+            # Build rich context for the chat agent from structured AI_report files
+            summary_data = _read_json(ai_dir / "summary.json") or {}
+            parts = []
+            if summary_data.get("risk_level"):
+                parts.append("RISK LEVEL: " + summary_data["risk_level"])
+            if summary_data.get("key_points"):
+                parts.append("KEY POINTS:\n" + "\n".join("- " + p for p in summary_data["key_points"]))
+            if summary_data.get("situation"):
+                parts.append("SITUATION:\n" + summary_data["situation"])
+            if summary_data.get("key_risks"):
+                parts.append("KEY RISKS:\n" + summary_data["key_risks"])
+            if summary_data.get("immediate_actions"):
+                parts.append("IMMEDIATE ACTIONS:\n" + summary_data["immediate_actions"])
+            for fname, label in (("risk", "RISK ANALYSIS"), ("impact", "IMPACT ANALYSIS"),
+                                  ("evacuation", "EVACUATION ANALYSIS"), ("crowd", "CROWD INTELLIGENCE")):
+                d = _read_json(ai_dir / f"{fname}.json")
+                if d:
+                    parts.append(f"{label}:\n{__import__('json').dumps(d, ensure_ascii=False)}")
+            summary = "\n\n".join(parts)
+            # Road summary from spatial analysis roads.geojson
+            from api.ts_data_routes import _spatial_dir, _build_road_summary
+            roads_path    = _spatial_dir(event_obj.id, event_obj.year, ts_obj.slot_time) / "ML" / "roads.geojson"
+            roads_geojson = _read_json(roads_path) or {}
+            road_summary  = _build_road_summary(roads_geojson)
 
     from agents.chat_agent import run_chat_agent
-
     return Response(
-        stream_with_context(run_chat_agent(summary=summary, road_summary=road_summary, message=message, history=history)),
+        stream_with_context(run_chat_agent(summary=summary, road_summary=road_summary,
+                                           message=message, history=history)),
         mimetype="text/plain",
     )
+
+
+# ── Register sub-module routes on this blueprint ──────────────────────────────
+import api.ts_prediction_routes  # noqa: E402, F401
+import api.ts_data_routes        # noqa: E402, F401

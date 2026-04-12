@@ -69,12 +69,14 @@ def login():
         token = jwt.encode({
             'user_id':  user.id,
             'username': user.username,
-            'exp':      datetime.utcnow() + timedelta(hours=1)
+            'is_admin': bool(user.is_admin),
+            'exp':      datetime.utcnow() + timedelta(hours=24)
         }, SECRET_KEY, algorithm='HS256')
 
         return jsonify({
             'token':    token,
             'username': user.username,
+            'is_admin': bool(user.is_admin),
             'message':  'Login successful.'
         }), 200
 
@@ -94,7 +96,8 @@ def verify():
 
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
-        return jsonify({'valid': True, 'username': payload['username']}), 200
+        return jsonify({'valid': True, 'username': payload['username'],
+                        'is_admin': bool(payload.get('is_admin', False))}), 200
     except jwt.ExpiredSignatureError:
         return jsonify({'message': 'Token expired.'}), 401
     except jwt.InvalidTokenError:

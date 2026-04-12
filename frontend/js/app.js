@@ -685,6 +685,7 @@
       if (userLabel) userLabel.textContent = '';
       if (devBtn) devBtn.style.display = 'none';
     }
+    window.AIModal?.setAdmin(_isAdmin);
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────────

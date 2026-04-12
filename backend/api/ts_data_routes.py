@@ -18,7 +18,7 @@ import json
 from pathlib import Path
 
 from flask import Response, jsonify, request
-from utils.auth_middleware import token_required
+from utils.auth_middleware import token_required, admin_required
 
 from api.timesteps import timesteps_bp, _get_event_and_ts, _pred_dir, _read_json
 
@@ -188,7 +188,9 @@ def _save_ai_report(ai_dir: Path, risk: dict, impact: dict, evacuation: dict,
 @timesteps_bp.route("/events/<int:event_id>/timesteps/<int:ts_id>/report", methods=["POST"])
 @token_required
 def generate_report(event_id: int, ts_id: int):
-    """Generate AI situation report on-demand. Returns cached result if available."""
+    """Return cached AI report for everyone; generate it only for admins."""
+    is_admin = (request.current_user or {}).get('is_admin', False)
+
     result, err = _get_event_and_ts(event_id, ts_id)
     if err:
         return err
@@ -198,6 +200,10 @@ def generate_report(event_id: int, ts_id: int):
     cached = _load_ai_report(ai_dir)
     if cached:
         return jsonify(cached), 200
+
+    # Cache miss — non-admins cannot trigger generation
+    if not is_admin:
+        return jsonify({"cached": False, "error": "Report not yet generated."}), 403
 
     fire_context = _read_json(_pred_dir(event.id, event.year, ts.slot_time) / "fire_context.json")
     if not fire_context:
@@ -243,7 +249,7 @@ def generate_report(event_id: int, ts_id: int):
 
 
 @timesteps_bp.route("/events/<int:event_id>/timesteps/<int:ts_id>/report-with-crowd", methods=["POST"])
-@token_required
+@admin_required
 def generate_report_with_crowd(event_id: int, ts_id: int):
     """Generate AI situation report incorporating crowd field reports.
 

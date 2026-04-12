@@ -70,6 +70,39 @@
     document.getElementById('chat-input').addEventListener('keydown', function(e) {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); _send(); }
     });
+
+    // Inject lock message element (hidden by default; shown for non-admins)
+    const chatCol = document.getElementById('ai-chat-col');
+    if (chatCol && !document.getElementById('chat-lock-msg')) {
+      const lock = document.createElement('div');
+      lock.id        = 'chat-lock-msg';
+      lock.className = 'chat-lock-msg';
+      lock.textContent = '🔒 Chat is available for admins only.';
+      lock.style.display = 'none';
+      chatCol.appendChild(lock);
+    }
+    _applyChatLock();
+  }
+
+  let _isAdmin = false;
+
+  function setAdmin(v) {
+    _isAdmin = !!v;
+    // Refresh chat lock state if modal is already rendered
+    _applyChatLock();
+  }
+
+  function _applyChatLock() {
+    const inputRow = document.querySelector('.chat-input-row');
+    const lockMsg  = document.getElementById('chat-lock-msg');
+    if (!inputRow) return;
+    if (_isAdmin) {
+      inputRow.style.display = '';
+      if (lockMsg) lockMsg.style.display = 'none';
+    } else {
+      inputRow.style.display = 'none';
+      if (lockMsg) lockMsg.style.display = '';
+    }
   }
 
   /** Called by app.js whenever a new timestep is selected. */
@@ -123,7 +156,9 @@
     if (!body) return;
     if (_cardState === 'idle') {
       body.className = 'ai-card-body idle';
-      body.innerHTML = '<div class="ai-card-prompt">Generate AI report</div>';
+      body.innerHTML = _isAdmin
+        ? '<div class="ai-card-prompt">Generate AI report</div>'
+        : '<div class="ai-card-prompt ai-card-locked">Report not yet generated</div>';
     } else if (_cardState === 'loading') {
       body.className = 'ai-card-body loading';
       body.innerHTML = '<div class="spinner-sm"></div><div class="ai-card-status">Generating…</div>';
@@ -132,8 +167,9 @@
       body.innerHTML =
         '<div class="ai-card-ready">Report ready</div>' +
         '<div class="ai-card-view">Click to view →</div>' +
-        '<button id="ai-crowd-btn" class="ai-crowd-btn" title="Re-run with latest crowd reports">↺ Update with user reports</button>';
-      document.getElementById('ai-crowd-btn').addEventListener('click', _startGenerateWithCrowd);
+        (_isAdmin ? '<button id="ai-crowd-btn" class="ai-crowd-btn" title="Re-run with latest crowd reports">↺ Update with user reports</button>' : '');
+      const crowdBtn = document.getElementById('ai-crowd-btn');
+      if (crowdBtn) crowdBtn.addEventListener('click', _startGenerateWithCrowd);
     } else if (_cardState === 'crowd-loading') {
       body.className = 'ai-card-body loading';
       body.innerHTML = '<div class="spinner-sm"></div><div class="ai-card-status">Updating with crowd data…</div>';
@@ -141,8 +177,12 @@
   }
 
   function _onCardClick() {
-    if (_cardState === 'idle') _startGenerate();
-    else if (_cardState === 'done') open();
+    if (_cardState === 'idle') {
+      if (_isAdmin) _startGenerate();
+      // non-admin: card shows "not yet generated" — clicking does nothing
+    } else if (_cardState === 'done') {
+      open();
+    }
     // loading / crowd-loading: ignore
   }
 
@@ -688,5 +728,5 @@
     );
   }
 
-  window.AIModal = { init, setContext, open, close, renderCard };
+  window.AIModal = { init, setContext, setAdmin, open, close, renderCard };
 })();

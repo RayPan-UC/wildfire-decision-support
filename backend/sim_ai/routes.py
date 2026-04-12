@@ -12,6 +12,7 @@ from utils.auth_middleware import token_required
 
 from api.crowd import crowd_bp
 from api.crowd_processing import bg_assess_and_cluster as _bg_assess_and_cluster
+from utils.auth_middleware import admin_required
 from sim_ai.geospatial import extract_gis_context
 from sim_ai.generator import generate_reports
 
@@ -20,7 +21,7 @@ simulate_bp = crowd_bp
 
 
 @crowd_bp.route("/<int:event_id>/field-reports/simulate", methods=["POST"])
-@token_required
+@admin_required
 def simulate_field_reports(event_id: int):
     """AI-generate N GIS-informed fake field reports.
 

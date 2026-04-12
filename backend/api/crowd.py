@@ -18,7 +18,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, request
-from utils.auth_middleware import token_required
+from utils.auth_middleware import token_required, admin_required
 
 from api.crowd_processing import bg_assess_and_cluster as _bg_assess_and_cluster
 
@@ -235,7 +235,7 @@ def add_report_comment(event_id: int, report_id: int):
 
 
 @crowd_bp.route("/<int:event_id>/field-reports/clear", methods=["POST"])
-@token_required
+@admin_required
 def clear_field_reports(event_id: int):
     """DEV only — delete all field reports (and their comments) for this event,
     and remove all crowd-derived prediction files from disk."""

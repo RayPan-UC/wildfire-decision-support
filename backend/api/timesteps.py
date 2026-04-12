@@ -19,7 +19,7 @@ import json
 from pathlib import Path
 
 from flask import Blueprint, Response, current_app, jsonify, request, stream_with_context
-from utils.auth_middleware import token_required
+from utils.auth_middleware import token_required, admin_required
 
 timesteps_bp = Blueprint("timesteps", __name__)
 
@@ -181,7 +181,7 @@ def get_ts_status(event_id: int, ts_id: int):
 
 
 @timesteps_bp.route("/events/<int:event_id>/timesteps/<int:ts_id>/run-prediction", methods=["POST"])
-@token_required
+@admin_required
 def run_prediction(event_id: int, ts_id: int):
     """Trigger prediction pipeline.
 
@@ -298,7 +298,7 @@ def _wipe_prediction_outputs(event, ts) -> None:
 # ── Chat ──────────────────────────────────────────────────────────────────────
 
 @timesteps_bp.route("/events/<int:event_id>/chat", methods=["POST"])
-@token_required
+@admin_required
 def chat(event_id: int):
     body    = request.get_json(force=True)
     message = body.get("message", "").strip()

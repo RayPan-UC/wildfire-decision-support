@@ -62,9 +62,11 @@ def seed_db():
     from geoalchemy2 import WKTElement
 
     # Ensure admin account exists and has is_admin=True
+    # Password read from ADMIN_PASSWORD env var (falls back to 'admin' for local dev only)
+    admin_password = os.getenv('ADMIN_PASSWORD', 'admin').encode('utf-8')
     admin = User.query.filter_by(username='admin').first()
     if not admin:
-        hashed = bcrypt.hashpw(b'admin', bcrypt.gensalt()).decode('utf-8')
+        hashed = bcrypt.hashpw(admin_password, bcrypt.gensalt()).decode('utf-8')
         db.session.add(User(username='admin', password=hashed, is_admin=True))
         db.session.commit()
         print("[db] seeded admin account")

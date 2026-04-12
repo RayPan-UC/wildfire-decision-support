@@ -18,7 +18,9 @@
   let _cardState = 'idle';    // 'idle' | 'loading' | 'done'
   let _genId = 0;             // generation counter to discard stale responses
 
-  let _reportData = null;  // cached report for deriving questions
+  let _reportData      = null;   // standard report cache
+  let _reportDataCrowd = null;   // crowd-enhanced report cache
+  let _viewingCrowd    = false;  // which version is currently displayed
 
   function _generateInitialQuestions(report) {
     const qs = [];
@@ -71,7 +73,21 @@
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); _send(); }
     });
     document.getElementById('ai-enhance-crowd-btn')?.addEventListener('click', function() {
-      if (!this.disabled) _startGenerateWithCrowd();
+      if (this.disabled) return;
+      if (_viewingCrowd) {
+        // Toggle back to standard report
+        _viewingCrowd = false;
+        _renderReport(_reportData);
+        _updateEnhanceBtn();
+      } else if (_reportDataCrowd) {
+        // Already cached — instant switch
+        _viewingCrowd = true;
+        _renderReport(_reportDataCrowd);
+        _updateEnhanceBtn();
+      } else {
+        // Generate for the first time
+        _startGenerateWithCrowd();
+      }
     });
 
     // Inject limit message element (shown when non-admin hits CHAT_LIMIT)
@@ -95,15 +111,42 @@
     _applyChatLock();
   }
 
+  let _crowdAvailable = false;
+
   function setCrowdAvailable(available) {
+    _crowdAvailable = !!available;
+    _updateEnhanceBtn();
+  }
+
+  function _updateEnhanceBtn() {
     const btn = document.getElementById('ai-enhance-crowd-btn');
     if (!btn) return;
-    btn.disabled = !available || !_isAdmin;
-    btn.title = !_isAdmin
-      ? 'Admin access required'
-      : available
-        ? 'Re-run AI report using latest crowd field reports'
-        : 'Requires crowd prediction to be run first';
+
+    if (_viewingCrowd) {
+      // Active crowd mode — clicking reverts to standard
+      btn.disabled   = false;
+      btn.textContent = '↩ View Standard Report';
+      btn.classList.add('ai-enhance-btn--active');
+      btn.title = 'Switch back to standard (no crowd) report';
+    } else {
+      btn.textContent = '⚡ Enhance with Crowd Data';
+      btn.classList.remove('ai-enhance-btn--active');
+      if (!_isAdmin) {
+        btn.disabled = true;
+        btn.title    = 'Admin access required';
+      } else if (!_crowdAvailable) {
+        btn.disabled = true;
+        btn.title    = 'Requires crowd prediction to be run first';
+      } else if (_reportDataCrowd) {
+        // Already generated — instant toggle
+        btn.disabled = false;
+        btn.title    = 'Switch to crowd-enhanced report';
+      } else {
+        // Need to generate
+        btn.disabled = false;
+        btn.title    = 'Re-run AI report using latest crowd field reports';
+      }
+    }
   }
 
   function _applyChatLock() {
@@ -124,10 +167,14 @@
     _eid  = eid;
     _tsid = tsid;
     if (changed) {
-      _reportLoaded = false;
-      _cardState = 'idle';
-      _history = [];
+      _reportLoaded    = false;
+      _cardState       = 'idle';
+      _history         = [];
+      _reportData      = null;
+      _reportDataCrowd = null;
+      _viewingCrowd    = false;
       _clearChat();
+      _updateEnhanceBtn();
     }
     // Update badge whether modal is open or not
     const badge = document.getElementById('ai-modal-badge');
@@ -204,11 +251,14 @@
     try {
       const report = await window.API.generateReport(_eid, _tsid);
       if (myGenId !== _genId) return;
+      _reportData   = report;
+      _viewingCrowd = false;
       _renderReport(report);
       _reportLoaded = true;
       _renderInitialSuggestions();
       _cardState = 'done';
       _updateCard();
+      _updateEnhanceBtn();
       _showAIToast();
     } catch(e) {
       if (myGenId !== _genId) return;
@@ -232,21 +282,20 @@
     try {
       const report = await window.API.generateReportWithCrowd(_eid, _tsid);
       if (myGenId !== _genId) return;
+      _reportDataCrowd = report;
+      _viewingCrowd    = true;
       _renderReport(report);
       _reportLoaded = true;
       _cardState = 'done';
       _updateCard();
+      _updateEnhanceBtn();
       _showAIToast();
-      const enhBtn2 = document.getElementById('ai-enhance-crowd-btn');
-      if (enhBtn2) { enhBtn2.disabled = false; enhBtn2.textContent = '⚡ Enhance with Crowd Data'; }
-      // Open modal immediately to show updated report
       open();
     } catch(e) {
       if (myGenId !== _genId) return;
       _cardState = 'done';
       _updateCard();
-      const enhBtn2 = document.getElementById('ai-enhance-crowd-btn');
-      if (enhBtn2) { enhBtn2.disabled = false; enhBtn2.textContent = '⚡ Enhance with Crowd Data'; }
+      _updateEnhanceBtn();
       const t = document.createElement('div');
       t.className = 'toast error';
       t.textContent = 'Crowd update failed: ' + _escHtml(e.message);

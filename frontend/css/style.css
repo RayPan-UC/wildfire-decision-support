@@ -455,6 +455,11 @@ body.light #prediction-status-bar { background: rgba(255,255,255,.93); }
 }
 .ai-enhance-btn:hover:not(:disabled) { background: rgba(156,39,176,.25); border-color: #9c27b0; color: #e1bee7; }
 .ai-enhance-btn:disabled { opacity: .35; cursor: not-allowed; }
+.ai-enhance-btn--active {
+  background: rgba(156,39,176,.3) !important;
+  border-color: #9c27b0 !important;
+  color: #e1bee7 !important;
+}
 
 /* AI modal body = report col + divider + chat col */
 .ai-modal-body {

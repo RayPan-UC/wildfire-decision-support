@@ -37,6 +37,12 @@ def _spatial_dir(event_id: int, year: int, slot_time) -> Path:
     return _DATA_DIR / "events" / f"{year}_{event_id:04d}" / "timesteps" / ts_str / "spatial_analysis"
 
 
+def _spatial_crowd_dir(event_id: int, year: int, slot_time) -> Path:
+    import pandas as pd
+    ts_str = pd.Timestamp(slot_time).strftime("%Y-%m-%dT%H%M")
+    return _DATA_DIR / "events" / f"{year}_{event_id:04d}" / "timesteps" / ts_str / "spatial_analysis_crowd"
+
+
 def _ai_report_dir(event_id: int, year: int, slot_time) -> Path:
     import pandas as pd
     ts_str = pd.Timestamp(slot_time).strftime("%Y-%m-%dT%H%M")
@@ -96,10 +102,14 @@ def get_roads(event_id: int, ts_id: int):
     if err:
         return err
     event, ts = result
+    crowd = request.args.get("crowd", "false").lower() == "true"
     model = request.args.get("model", "ML")
     if model not in ("ML", "wind_driven"):
         model = "ML"
-    path = _spatial_dir(event.id, event.year, ts.slot_time) / model / "roads.geojson"
+    if crowd:
+        path = _spatial_crowd_dir(event.id, event.year, ts.slot_time) / model / "roads.geojson"
+    else:
+        path = _spatial_dir(event.id, event.year, ts.slot_time) / model / "roads.geojson"
     from api.timesteps import _read_geojson
     return jsonify(_read_geojson(path)), 200
 
@@ -111,10 +121,14 @@ def get_population(event_id: int, ts_id: int):
     if err:
         return err
     event, ts = result
+    crowd = request.args.get("crowd", "false").lower() == "true"
     model = request.args.get("model", "ML")
     if model not in ("ML", "wind_driven"):
         model = "ML"
-    path = _spatial_dir(event.id, event.year, ts.slot_time) / model / "population.json"
+    if crowd:
+        path = _spatial_crowd_dir(event.id, event.year, ts.slot_time) / model / "population.json"
+    else:
+        path = _spatial_dir(event.id, event.year, ts.slot_time) / model / "population.json"
     if not path.exists():
         return jsonify({}), 200
     return Response(path.read_text(encoding="utf-8"), mimetype="application/json"), 200

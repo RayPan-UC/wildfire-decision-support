@@ -731,8 +731,9 @@ body.light #prediction-status-bar { background: rgba(255,255,255,.93); }
 .pred-type-swatch {
   width: 28px; height: 12px; border-radius: 3px; flex-shrink: 0; border: 1.5px solid transparent;
 }
-.ml-swatch   { background: linear-gradient(90deg, #ff2222 0%, #ff8c00 50%, #ffd700 100%); border-color: rgba(255,34,34,.4); }
-.wind-swatch { background: linear-gradient(90deg, #0d47a1 0%, #1e88e5 50%, #90caf9 100%); border-color: rgba(30,136,229,.4); }
+.ml-swatch    { background: linear-gradient(90deg, #ff2222 0%, #ff8c00 50%, #ffd700 100%); border-color: rgba(255,34,34,.4); }
+.wind-swatch  { background: linear-gradient(90deg, #0d47a1 0%, #1e88e5 50%, #90caf9 100%); border-color: rgba(30,136,229,.4); }
+.crowd-swatch { background: linear-gradient(90deg, #6a1b9a 0%, #9c27b0 50%, #ce93d8 100%); border-color: rgba(156,39,176,.4); }
 .pred-type-info { display: flex; flex-direction: column; gap: 1px; }
 .pred-type-label { font-size: 12px; font-weight: 600; color: var(--text); line-height: 1.2; }
 .pred-type-hint  { font-size: 9px;  color: var(--text2); line-height: 1.2; }

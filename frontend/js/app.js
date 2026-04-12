@@ -11,7 +11,7 @@
   let currentEvent = null;
   let currentWeather = [];   // [{hour, temp_c, rh, wind_speed_kmh, wind_dir}]
 
-  let predictionType      = 'ml';   // 'ml' | 'wind'
+  let predictionType      = 'ml';   // 'ml' | 'wind' | 'crowd'
   let _timestepsDone      = [];     // full list of done timesteps for current event
   let _currentTsIndex     = -1;     // index of currently selected timestep in _timestepsDone
   let _replayVirtualTime  = 0;      // current virtual clock ms (shared with DEV controls)
@@ -368,7 +368,7 @@
 
     // Risk zone visibility — gated by prediction type
     if (eventMap) {
-      const useML   = predictionType === 'ml';
+      const useML   = predictionType === 'ml' || predictionType === 'crowd';
       const useWind = predictionType === 'wind';
       eventMap.setRiskVisible('3h',      useML   && h >= 3  && h <= 5);
       eventMap.setRiskVisible('6h',      useML   && h >= 6  && h <= 11);
@@ -439,20 +439,14 @@
         if (crowdDone) {
           clearInterval(_pollCrowdIntervals[key]);
           delete _pollCrowdIntervals[key];
-          _crowdMode = true;
           _hidePredStatus();
-          // Reload perimeter + hotspots + risk zones from crowd endpoints
-          var eid  = currentEvent.id;
-          var tsid = ts.id;
-          Promise.allSettled([
-            window.API.getPerimeter(eid, tsid, true),
-            window.API.getHotspots(eid, tsid, true),
-            window.API.getRiskZones(eid, tsid, true),
-          ]).then(function(r) {
-            if (r[0].status === 'fulfilled') eventMap.renderPerimeter(r[0].value);
-            if (r[1].status === 'fulfilled') eventMap.renderHotspots(r[1].value);
-            if (r[2].status === 'fulfilled') eventMap.renderRiskZones(r[2].value);
-          });
+          // Enable the ML + Crowd radio and auto-select it
+          _setCrowdRadio(true);
+          var crowdRadio = document.getElementById('pred-type-crowd');
+          if (crowdRadio) {
+            crowdRadio.checked = true;
+            crowdRadio.dispatchEvent(new Event('change', { bubbles: true }));
+          }
         }
       } catch(e) {}
     }, 2000);
@@ -518,6 +512,20 @@
     } else {
       _hidePredStatus();
     }
+
+    // Enable/disable crowd radio based on whether crowd prediction exists for this timestep
+    window.API.getTsStatus(eid, tsid).then(function(s) {
+      var crowdReady = s.crowd_prediction_status === 'done' && s.spatial_crowd_status === 'done';
+      _setCrowdRadio(crowdReady);
+      // If we're in crowd mode but crowd isn't ready for this timestep, fall back to ML
+      if (predictionType === 'crowd' && !crowdReady) {
+        predictionType = 'ml';
+        _crowdMode = false;
+        var mlRadio = document.querySelector('input[name="pred-type"][value="ml"]');
+        if (mlRadio) mlRadio.checked = true;
+        _updateRiskLegend();
+      }
+    }).catch(function() { _setCrowdRadio(false); });
 
     // Sentinel-2: find nearest scene, then update tile URL with actual acquired date
     const satEl = document.getElementById('ts-sat-label');
@@ -713,10 +721,41 @@
     document.addEventListener('change', function(e) {
       if (e.target.name !== 'pred-type') return;
       predictionType = e.target.value;
+      var isCrowd = predictionType === 'crowd';
+      _crowdMode = isCrowd;
+
       var h = +(document.getElementById('fcast-slider')?.value || 0);
       _setForecastHour(h);
       _updateRiskLegend();
+
+      // Reload spatial layers for the active timestep
+      if (!currentEvent) return;
+      var ts = _timestepsDone[_currentTsIndex];
+      if (!ts) return;
+      var eid  = currentEvent.id;
+      var tsid = ts.id;
+      Promise.allSettled([
+        window.API.getPerimeter(eid, tsid, isCrowd),
+        window.API.getHotspots(eid, tsid, isCrowd),
+        window.API.getRiskZones(eid, tsid, isCrowd),
+        window.API.getRoads(eid, tsid, isCrowd),
+      ]).then(function(r) {
+        if (r[0].status === 'fulfilled') eventMap.renderPerimeter(r[0].value);
+        if (r[1].status === 'fulfilled') eventMap.renderHotspots(r[1].value);
+        if (r[2].status === 'fulfilled') eventMap.renderRiskZones(r[2].value);
+        if (r[3].status === 'fulfilled') eventMap.renderRoads(r[3].value);
+      });
     });
+  }
+
+  function _setCrowdRadio(enabled) {
+    var radio = document.getElementById('pred-type-crowd');
+    var hint  = document.getElementById('pred-type-crowd-hint');
+    var label = document.getElementById('pred-type-crowd-label');
+    if (!radio) return;
+    radio.disabled = !enabled;
+    if (label) label.style.opacity = enabled ? '1' : '0.45';
+    if (hint)  hint.textContent   = enabled ? 'ML augmented with field reports' : 'Awaiting crowd data…';
   }
 
   function _updateRiskLegend() {
@@ -724,6 +763,8 @@
     if (!row) return;
     if (predictionType === 'wind') {
       row.innerHTML = '<span class="leg-swatch" style="background:#1e88e5;opacity:.75"></span>High risk zone (Wind)';
+    } else if (predictionType === 'crowd') {
+      row.innerHTML = '<span class="leg-swatch" style="background:#9c27b0;opacity:.8"></span>High risk zone (ML + Crowd)';
     } else {
       row.innerHTML = '<span class="leg-swatch" style="background:#ff2222;opacity:.7"></span>High risk zone (ML)';
     }

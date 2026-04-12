@@ -7,6 +7,7 @@ class User(db.Model):
     id         = db.Column(db.Integer, primary_key=True)
     username   = db.Column(db.String(255), unique=True, nullable=False)
     password   = db.Column(db.String(255), nullable=False)
+    is_admin   = db.Column(db.Boolean, nullable=False, default=False)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
 
 
@@ -23,6 +24,9 @@ class FireEvent(db.Model):
     #   NULL  → Realtime: pipeline fetches latest data on each run
     #   value → Replay:   historical analysis up to this date (inclusive)
     end_date    = db.Column(db.Date, nullable=True)
+
+    # Admin-controlled shared replay clock (ms since epoch). NULL = start of event.
+    replay_ms   = db.Column(db.BigInteger, nullable=True)
 
     timesteps   = db.relationship("EventTimestep", backref="event", lazy=True)
 
@@ -48,14 +52,76 @@ class EventTimestep(db.Model):
     # True when gap_hours > 12 — prediction may be stale
     data_gap_warn  = db.Column(db.Boolean, nullable=False, default=False)
 
-    # Processing status per stage: 'pending' | 'running' | 'done' | 'failed'
-    prediction_status       = db.Column(db.Text, nullable=False, default="pending")
-    spatial_analysis_status = db.Column(db.Text, nullable=False, default="pending")
+    created_at = db.Column(db.DateTime, server_default=db.func.now())
 
-    # Spatial analysis results (numeric, stored in DB)
-    affected_population = db.Column(db.Integer)
-    at_risk_3h          = db.Column(db.Integer)
-    at_risk_6h          = db.Column(db.Integer)
-    at_risk_12h         = db.Column(db.Integer)
 
+# 2. Crowd intelligence ────────────────────────────────────────────────────────
+
+class Theme(db.Model):
+    __tablename__ = 'themes'
+    id         = db.Column(db.Integer, primary_key=True)
+    event_id   = db.Column(db.Integer, db.ForeignKey('fire_events.id'), nullable=True)
+
+    center_lat = db.Column(db.Float, nullable=False)
+    center_lon = db.Column(db.Float, nullable=False)
+    radius_m   = db.Column(db.Float, nullable=False, default=1000.0)
+
+    title      = db.Column(db.Text, nullable=False)
+    summary    = db.Column(db.Text, nullable=False)
+
+    like_count   = db.Column(db.Integer, nullable=False, default=0)
+    generated_at = db.Column(db.DateTime, nullable=True)
+    created_at   = db.Column(db.DateTime, server_default=db.func.now())
+
+    reports  = db.relationship('FieldReport', backref='theme', lazy=True,
+                               foreign_keys='FieldReport.theme_id')
+    comments = db.relationship('ThemeComment', backref='theme', lazy=True)
+
+
+class FieldReport(db.Model):
+    __tablename__ = 'field_reports'
+    id       = db.Column(db.Integer, primary_key=True)
+    event_id = db.Column(db.Integer, db.ForeignKey('fire_events.id'), nullable=True)
+    user_id  = db.Column(db.Integer, db.ForeignKey('users.id'),       nullable=True)
+
+    # 'fire_report' | 'info' | 'request_help' | 'offer_help'
+    post_type   = db.Column(db.Text, nullable=False)
+    lat         = db.Column(db.Float, nullable=False)
+    lon         = db.Column(db.Float, nullable=False)
+    bearing     = db.Column(db.Float, nullable=True)   # degrees from EXIF (fire_report only)
+    photo_path  = db.Column(db.Text,  nullable=True)
+    description = db.Column(db.Text,  nullable=True)
+
+    # AI-assessed intensity (background, set after insert)
+    # 'low' | 'mid' | 'high' | null
+    ai_intensity = db.Column(db.Text, nullable=True)
+
+    # Community interaction
+    like_count = db.Column(db.Integer, nullable=False, default=0)
+    flag_count = db.Column(db.Integer, nullable=False, default=0)
+
+    # Set when report is absorbed into a theme cluster
+    theme_id   = db.Column(db.Integer, db.ForeignKey('themes.id'), nullable=True)
+    created_at = db.Column(db.DateTime, server_default=db.func.now())
+
+    comments = db.relationship('FieldReportComment', backref='report', lazy=True)
+
+
+class FieldReportComment(db.Model):
+    __tablename__ = 'field_report_comments'
+    id        = db.Column(db.Integer, primary_key=True)
+    report_id = db.Column(db.Integer, db.ForeignKey('field_reports.id'), nullable=False)
+    user_id   = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    content    = db.Column(db.Text, nullable=False)
+    like_count = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.DateTime, server_default=db.func.now())
+
+
+class ThemeComment(db.Model):
+    __tablename__ = 'theme_comments'
+    id       = db.Column(db.Integer, primary_key=True)
+    theme_id = db.Column(db.Integer, db.ForeignKey('themes.id'), nullable=False)
+    user_id  = db.Column(db.Integer, db.ForeignKey('users.id'),  nullable=True)
+
+    content    = db.Column(db.Text, nullable=False)
     created_at = db.Column(db.DateTime, server_default=db.func.now())

@@ -7,17 +7,16 @@ Summarises human population impact.
 from __future__ import annotations
 
 import json
+import re
 
 from agents._client import call_llm
 from agents.prompts import IMPACT_AGENT_SYSTEM
 
 
-def run_impact_agent(fire_context: dict, population: dict) -> str:
-    """Return impact analysis text for the current timestep.
+def run_impact_agent(fire_context: dict, population: dict) -> dict:
+    """Return impact analysis dict for the current timestep.
 
-    Args:
-        fire_context: Contents of fire_context.json (fire metrics, weather, roads).
-        population:   Dict with affected_population, at_risk_3h/6h/12h counts.
+    Returns keys: population, communities_affected, worsening_factors, impact_summary
     """
     pop = population or {}
     lines = [
@@ -30,4 +29,22 @@ def run_impact_agent(fire_context: dict, population: dict) -> str:
         "Fire situation context (JSON):",
         json.dumps(fire_context, separators=(',', ':')),
     ]
-    return call_llm(IMPACT_AGENT_SYSTEM, "\n".join(lines))
+    text = call_llm(IMPACT_AGENT_SYSTEM, "\n".join(lines))
+    try:
+        m = re.search(r'\{.*\}', text, re.DOTALL)
+        if m:
+            return json.loads(m.group())
+    except Exception:
+        pass
+    # Fallback
+    return {
+        "population": {
+            "within_perimeter": pop.get("affected_population") or 0,
+            "at_risk_3h":       pop.get("at_risk_3h") or 0,
+            "at_risk_6h":       pop.get("at_risk_6h") or 0,
+            "at_risk_12h":      pop.get("at_risk_12h") or 0,
+        },
+        "communities_affected": [],
+        "worsening_factors": [],
+        "impact_summary": text,
+    }

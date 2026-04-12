@@ -59,7 +59,7 @@ def _gemini_call(system: str, user_msg: str) -> str:
         "system_instruction": {"parts": [{"text": system}]},
         "contents": [{"role": "user", "parts": [{"text": user_msg}]}],
     }
-    res = requests.post(url, params={"key": os.environ["GEMINI_API_KEY"]}, json=body, timeout=60)
+    res = requests.post(url, params={"key": os.environ["GEMINI_API_KEY"]}, json=body, timeout=120)
     res.raise_for_status()
     return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
 

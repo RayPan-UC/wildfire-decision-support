@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     gcc \
     g++ \
+    git \
     gdal-bin \
     libgdal-dev \
     libproj-dev \

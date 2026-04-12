@@ -298,7 +298,7 @@ def _wipe_prediction_outputs(event, ts) -> None:
 # ── Chat ──────────────────────────────────────────────────────────────────────
 
 @timesteps_bp.route("/events/<int:event_id>/chat", methods=["POST"])
-@admin_required
+@token_required
 def chat(event_id: int):
     body    = request.get_json(force=True)
     message = body.get("message", "").strip()

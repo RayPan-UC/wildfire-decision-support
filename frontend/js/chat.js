@@ -71,24 +71,24 @@
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); _send(); }
     });
 
-    // Inject lock message element (hidden by default; shown for non-admins)
+    // Inject limit message element (shown when non-admin hits CHAT_LIMIT)
     const chatCol = document.getElementById('ai-chat-col');
     if (chatCol && !document.getElementById('chat-lock-msg')) {
       const lock = document.createElement('div');
       lock.id        = 'chat-lock-msg';
       lock.className = 'chat-lock-msg';
-      lock.textContent = '🔒 Chat is available for admins only.';
       lock.style.display = 'none';
       chatCol.appendChild(lock);
     }
     _applyChatLock();
   }
 
-  let _isAdmin = false;
+  let _isAdmin   = false;
+  let _chatCount = 0;         // messages sent this session (non-admin only)
+  const CHAT_LIMIT = 3;
 
   function setAdmin(v) {
     _isAdmin = !!v;
-    // Refresh chat lock state if modal is already rendered
     _applyChatLock();
   }
 
@@ -96,12 +96,11 @@
     const inputRow = document.querySelector('.chat-input-row');
     const lockMsg  = document.getElementById('chat-lock-msg');
     if (!inputRow) return;
-    if (_isAdmin) {
-      inputRow.style.display = '';
-      if (lockMsg) lockMsg.style.display = 'none';
-    } else {
-      inputRow.style.display = 'none';
-      if (lockMsg) lockMsg.style.display = '';
+    const limited = !_isAdmin && _chatCount >= CHAT_LIMIT;
+    inputRow.style.display = limited ? 'none' : '';
+    if (lockMsg) {
+      lockMsg.style.display = limited ? '' : 'none';
+      if (limited) lockMsg.textContent = '已達本次對話上限（' + CHAT_LIMIT + ' 則）。';
     }
   }
 
@@ -688,10 +687,15 @@
 
   function _send() {
     if (_streaming || !_eid) return;
+    if (!_isAdmin && _chatCount >= CHAT_LIMIT) return;
     const input = document.getElementById('chat-input');
     const msg   = input.value.trim();
     if (!msg) return;
     input.value = '';
+    if (!_isAdmin) {
+      _chatCount++;
+      _applyChatLock();
+    }
 
     _appendMsg('user', msg);
     _history.push({ role: 'user', content: msg });

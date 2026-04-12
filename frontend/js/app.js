@@ -789,11 +789,15 @@
       win.classList.toggle('hidden');
       if (!win.classList.contains('hidden')) {
 
-        var runBtn    = document.getElementById('dev-run-pred-btn');
-        var rerunBtn  = document.getElementById('dev-rerun-pred-btn');
-        var simBtn    = document.getElementById('dev-sim-btn');
-        if (runBtn)   runBtn.disabled   = !currentEvent;
-        if (rerunBtn) rerunBtn.disabled = !currentEvent;
+        var runBtn         = document.getElementById('dev-run-pred-btn');
+        var rerunBtn       = document.getElementById('dev-rerun-pred-btn');
+        var rerunRptBtn    = document.getElementById('dev-rerun-report-btn');
+        var rerunRptCrwBtn = document.getElementById('dev-rerun-report-crowd-btn');
+        var simBtn         = document.getElementById('dev-sim-btn');
+        if (runBtn)         runBtn.disabled         = !currentEvent;
+        if (rerunBtn)       rerunBtn.disabled       = !currentEvent;
+        if (rerunRptBtn)    rerunRptBtn.disabled    = !currentEvent;
+        if (rerunRptCrwBtn) rerunRptCrwBtn.disabled = !currentEvent;
         _updateSimBtnState();
       }
     });
@@ -930,6 +934,47 @@
         })
         .catch(function(err) {
           btn.disabled = false;
+        });
+    });
+
+    // ── Re-run AI Report ────────────────────────────────────────────────────
+    document.getElementById('dev-rerun-report-btn') && document.getElementById('dev-rerun-report-btn').addEventListener('click', function() {
+      if (!currentEvent || _currentTsIndex < 0 || !_timestepsDone.length) return;
+      var ts  = _timestepsDone[_currentTsIndex];
+      var btn = this;
+      btn.disabled = true;
+      window.API.generateReport(currentEvent.id, ts.id, true)
+        .then(function() {
+          btn.disabled = false;
+          showToast('AI Report regenerated', 'success');
+          if (window.AIModal) {
+            window.AIModal.setContext(currentEvent.id, ts.id);
+            window.AIModal.renderCard();
+          }
+        })
+        .catch(function(err) {
+          btn.disabled = false;
+          showToast('Re-run failed: ' + (err.message || 'unknown'), 'error');
+        });
+    });
+
+    document.getElementById('dev-rerun-report-crowd-btn') && document.getElementById('dev-rerun-report-crowd-btn').addEventListener('click', function() {
+      if (!currentEvent || _currentTsIndex < 0 || !_timestepsDone.length) return;
+      var ts  = _timestepsDone[_currentTsIndex];
+      var btn = this;
+      btn.disabled = true;
+      window.API.generateReportWithCrowd(currentEvent.id, ts.id, true)
+        .then(function() {
+          btn.disabled = false;
+          showToast('AI Report (Crowd) regenerated', 'success');
+          if (window.AIModal) {
+            window.AIModal.setContext(currentEvent.id, ts.id);
+            window.AIModal.renderCard();
+          }
+        })
+        .catch(function(err) {
+          btn.disabled = false;
+          showToast('Re-run failed: ' + (err.message || 'unknown'), 'error');
         });
     });
 

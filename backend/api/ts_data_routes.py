@@ -167,7 +167,8 @@ def _build_road_summary(roads_geojson: dict) -> list[dict]:
 # ── AI Report helpers ─────────────────────────────────────────────────────────
 
 def _load_ai_report(ai_dir: Path) -> dict | None:
-    """Return combined report dict from AI_report/ if summary.json exists, else None."""
+    """Return standard report dict if summary.json exists, else None.
+    Includes has_crowd=True when summary_crowd.json also exists."""
     summary_path = ai_dir / "summary.json"
     if not summary_path.exists():
         return None
@@ -178,21 +179,48 @@ def _load_ai_report(ai_dir: Path) -> dict | None:
         "situation":         summary.get("situation", ""),
         "key_risks":         summary.get("key_risks", ""),
         "immediate_actions": summary.get("immediate_actions", ""),
+        "has_crowd":         (ai_dir / "summary_crowd.json").exists(),
     }
-    for name in ("risk", "impact", "evacuation", "crowd"):
+    for name in ("risk", "impact", "evacuation"):
         p = ai_dir / f"{name}.json"
         if p.exists():
             out[name] = json.loads(p.read_text(encoding="utf-8"))
     return out
 
 
+def _load_crowd_report(ai_dir: Path) -> dict | None:
+    """Return crowd-enriched report dict if summary_crowd.json exists, else None."""
+    summary_path = ai_dir / "summary_crowd.json"
+    if not summary_path.exists():
+        return None
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    out = {
+        "risk_level":        summary.get("risk_level", "Unknown"),
+        "key_points":        summary.get("key_points", []),
+        "situation":         summary.get("situation", ""),
+        "key_risks":         summary.get("key_risks", ""),
+        "immediate_actions": summary.get("immediate_actions", ""),
+        "has_crowd":         True,
+    }
+    for name in ("risk", "impact", "evacuation"):
+        p = ai_dir / f"{name}.json"
+        if p.exists():
+            out[name] = json.loads(p.read_text(encoding="utf-8"))
+    crowd_path = ai_dir / "crowd.json"
+    if crowd_path.exists():
+        out["crowd"] = json.loads(crowd_path.read_text(encoding="utf-8"))
+    return out
+
+
 def _save_ai_report(ai_dir: Path, risk: dict, impact: dict, evacuation: dict,
-                    summary: dict, crowd: dict | None = None) -> None:
+                    summary: dict, crowd: dict | None = None, crowd_run: bool = False) -> None:
+    """Save AI report files. crowd_run=True writes summary_crowd.json instead of summary.json."""
     ai_dir.mkdir(parents=True, exist_ok=True)
     (ai_dir / "risk.json").write_text(json.dumps(risk, ensure_ascii=False, indent=2), encoding="utf-8")
     (ai_dir / "impact.json").write_text(json.dumps(impact, ensure_ascii=False, indent=2), encoding="utf-8")
     (ai_dir / "evacuation.json").write_text(json.dumps(evacuation, ensure_ascii=False, indent=2), encoding="utf-8")
-    (ai_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    summary_file = "summary_crowd.json" if crowd_run else "summary.json"
+    (ai_dir / summary_file).write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     if crowd is not None:
         (ai_dir / "crowd.json").write_text(json.dumps(crowd, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -202,7 +230,8 @@ def _save_ai_report(ai_dir: Path, risk: dict, impact: dict, evacuation: dict,
 @timesteps_bp.route("/events/<int:event_id>/timesteps/<int:ts_id>/report", methods=["POST"])
 @token_required
 def generate_report(event_id: int, ts_id: int):
-    """Return cached AI report for everyone; generate it only for admins."""
+    """Return cached AI report for everyone; generate it only for admins.
+    Body: { force: true } bypasses cache (admin only)."""
     is_admin = (request.current_user or {}).get('is_admin', False)
 
     result, err = _get_event_and_ts(event_id, ts_id)
@@ -210,12 +239,15 @@ def generate_report(event_id: int, ts_id: int):
         return err
     event, ts = result
 
+    force = bool((request.get_json(silent=True) or {}).get("force", False))
     ai_dir = _ai_report_dir(event.id, event.year, ts.slot_time)
-    cached = _load_ai_report(ai_dir)
-    if cached:
-        return jsonify(cached), 200
 
-    # Cache miss — non-admins cannot trigger generation
+    if not force:
+        cached = _load_ai_report(ai_dir)
+        if cached:
+            return jsonify(cached), 200
+
+    # Cache miss (or force) — non-admins cannot trigger generation
     if not is_admin:
         return jsonify({"cached": False, "error": "Report not yet generated."}), 403
 
@@ -259,16 +291,16 @@ def generate_report(event_id: int, ts_id: int):
         "risk":              risk_data,
         "impact":            impact_data,
         "evacuation":        evac_data,
+        "has_crowd":         (ai_dir / "summary_crowd.json").exists(),
     }), 200
 
 
 @timesteps_bp.route("/events/<int:event_id>/timesteps/<int:ts_id>/report-with-crowd", methods=["POST"])
 @admin_required
 def generate_report_with_crowd(event_id: int, ts_id: int):
-    """Generate AI situation report incorporating crowd field reports.
-
-    Always re-runs all four agents (risk, impact, evacuation, crowd) in parallel
-    and overwrites AI_report/ files with the crowd-enriched result.
+    """Return cached crowd report if available; generate only when needed.
+    Body: { force: true } bypasses cache.
+    Saves to summary_crowd.json (never overwrites summary.json).
     """
     import concurrent.futures
     import pandas as pd
@@ -278,6 +310,14 @@ def generate_report_with_crowd(event_id: int, ts_id: int):
     if err:
         return err
     event, ts = result
+
+    force = bool((request.get_json(silent=True) or {}).get("force", False))
+    ai_dir = _ai_report_dir(event.id, event.year, ts.slot_time)
+
+    if not force:
+        cached = _load_crowd_report(ai_dir)
+        if cached:
+            return jsonify(cached), 200
 
     fire_context = _read_json(_pred_dir(event.id, event.year, ts.slot_time) / "fire_context.json")
     if not fire_context:
@@ -332,8 +372,7 @@ def generate_report_with_crowd(event_id: int, ts_id: int):
     except Exception as e:
         return jsonify({"error": f"AI agent failed: {e}"}), 502
 
-    ai_dir = _ai_report_dir(event.id, event.year, ts.slot_time)
-    _save_ai_report(ai_dir, risk_data, impact_data, evac_data, overview, crowd=crowd_data)
+    _save_ai_report(ai_dir, risk_data, impact_data, evac_data, overview, crowd=crowd_data, crowd_run=True)
 
     return jsonify({
         "risk_level":        overview.get("risk_level", "Unknown"),
@@ -345,4 +384,5 @@ def generate_report_with_crowd(event_id: int, ts_id: int):
         "impact":            impact_data,
         "evacuation":        evac_data,
         "crowd":             crowd_data,
+        "has_crowd":         True,
     }), 200

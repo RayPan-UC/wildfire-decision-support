@@ -25,7 +25,12 @@ wildfire-decision-support/
 │   │   ├── ts_prediction_routes.py  # perimeter(?crowd=true→perimeter_crowd.geojson), hotspots(?crowd=true), risk-zones(?crowd=true), risk-zones-wind, actual-perimeter, fire-context
 │   │   ├── ts_data_routes.py     # weather, wind-field, roads, population, report, report-with-crowd
 │   │   │                         #   _build_road_summary(): major non-clear roads from roads.geojson → evacuation agent input
-│   │   │                         #   generate_report: loads landmarks.json → passes (fire_context, road_summary, landmarks) to evacuation agent
+│   │   │                         #   generate_report: returns cached if exists (all users); generates if admin; body {force:true} bypasses cache
+│   │   │                         #   generate_report: response includes has_crowd=True when summary_crowd.json exists
+│   │   │                         #   generate_report_with_crowd: checks summary_crowd.json cache first; body {force:true} bypasses
+│   │   │                         #   _load_ai_report: reads summary.json (standard) + sets has_crowd flag
+│   │   │                         #   _load_crowd_report: reads summary_crowd.json + crowd.json
+│   │   │                         #   _save_ai_report: crowd_run=True → writes summary_crowd.json (never overwrites summary.json)
 │   │   │   ├── crowd.py              # field-reports, themes, comments, likes
 │   │   │                         #   clear_field_reports: deletes DB rows + purges crowd disk files (hotspots_crowd, perimeter_crowd, ML_crowd/, spatial_analysis_crowd/)
 │   │   │                         #   bg_assess_and_cluster disabled — no theme generation
@@ -92,7 +97,7 @@ wildfire-decision-support/
 │   │   └── routes.py             # POST /<event_id>/field-reports/simulate — persists reports + comments with backfilled created_at
 │   │
 │   └── utils/
-│       ├── auth_middleware.py    # JWT verification middleware
+│       ├── auth_middleware.py    # JWT verification middleware; token_required + admin_required decorators
 │       └── background.py        # run_in_background(fn, *args) — threading.Thread wrapper
 │
 │   # Startup sweep: _sweep_desynced_timesteps(app) in main.py resets "done"/"failed" status
@@ -173,7 +178,13 @@ wildfire-decision-support/
 │   │                   ├── wind_driven/
 │   │                   │   ├── roads.geojson  #   placeholder (wind_driven runner TBD)
 │   │                   │   └── population.json
-│   │                   └── ai_summary.json    #   generated on first POST /report, cached
+│   │                   ├── AI_report/         ← generated on POST /report or /report-with-crowd
+│                   │   ├── summary.json       #   standard report overview (risk_level, key_points, situation, key_risks, immediate_actions)
+│                   │   ├── summary_crowd.json #   crowd-enhanced overview (written by /report-with-crowd; never overwrites summary.json)
+│                   │   ├── risk.json          #   risk agent output
+│                   │   ├── impact.json        #   impact agent output
+│                   │   ├── evacuation.json    #   evacuation agent output
+│                   │   └── crowd.json         #   crowd analysis agent output (only when crowd run)
 │   │
 │   └── static/
 │       ├── models/               # ML models (Zenodo: records/19435138)
@@ -213,16 +224,17 @@ wildfire-decision-support/
 | GET  | `/api/events/:id/timesteps/:ts_id/actual-perimeter` | Pre-built ROS-weighted perimeters (0h/3h/6h/12h); base = T_{-1}, growth = T_0 − T_{-1}, scaled outward from T1 centroid; weight = cumROS[slot_h+Δh] / totalROS |
 | GET  | `/api/events/:id/timesteps/:ts_id/fire-context` | Fire metrics, weather, FWI, wind forecast, road summary |
 | GET  | `/api/events/:id/timesteps/:ts_id/status` | `{prediction_status, spatial_analysis_status}` |
-| POST | `/api/events/:id/timesteps/:ts_id/run-prediction` | Trigger on-demand prediction for one timestep |
-| POST | `/api/events/:id/timesteps/:ts_id/report` | Generate AI situation report (cached) |
-| POST | `/api/events/:id/chat` | Stateless streaming chat (`{message, timestep_id, history[]}`) |
+| POST | `/api/events/:id/timesteps/:ts_id/run-prediction` | **Admin only** — Trigger on-demand prediction; `{force, crowd}` params |
+| POST | `/api/events/:id/timesteps/:ts_id/report` | Return cached AI report (all users); generate if no cache (**admin only**); body `{force: true}` bypasses cache |
+| POST | `/api/events/:id/timesteps/:ts_id/report-with-crowd` | **Admin only** — Return cached crowd report; generate if no cache; body `{force: true}` bypasses cache |
+| POST | `/api/events/:id/chat` | Stateless streaming chat (`{message, timestep_id, history[]}`); non-admin limited to 3 messages/session |
 | POST | `/api/events/:id/field-reports` | Submit field report (multipart: photo + form fields) |
 | GET  | `/api/events/:id/field-reports?before=<ISO>` | List field reports (optional `before` → 24h window ending at that time) |
 | GET  | `/api/events/:id/themes` | List all AI-aggregated themes |
 | POST | `/api/events/:id/themes/:theme_id/like` | Like a theme |
 | POST | `/api/events/:id/themes/:theme_id/comments` | Add comment to a theme |
-| POST | `/api/events/:id/field-reports/simulate` | AI-generate N fake field reports with GIS placement + comments (`{n, hints, ts_id}`) |
-| POST | `/api/events/:id/field-reports/clear` | DEV — delete all field reports + comments for event |
+| POST | `/api/events/:id/field-reports/simulate` | **Admin only** — AI-generate N fake field reports with GIS placement + comments (`{n, hints, ts_id}`) |
+| POST | `/api/events/:id/field-reports/clear` | **Admin only** — delete all field reports + comments + crowd disk files for event |
 | POST | `/api/events/:id/field-reports/:rid/like` | Like a field report |
 | POST | `/api/events/:id/field-reports/:rid/flag` | Flag a field report as inappropriate |
 | GET  | `/api/events/:id/field-reports/:rid/comments` | List comments (24h expiry unless liked) |
@@ -355,16 +367,21 @@ On-demand (replay clock reaches a slot):
     → when 'done': frontend reloads all layers + full dashboard
 
 ─────────────────────────────────────────────────────────────────
-On-demand (user clicks "Generate Report"):
+On-demand (user clicks "Generate Report" / renderCard auto-loads):
   POST /api/events/:id/timesteps/:ts_id/report
-    ├─ return cached ai_summary.json if exists
-    ├─ load fire_context.json
-    ├─ read population from spatial_analysis/ML/population.json
-    ├─ risk_agent(fire_context) → risk analysis
-    ├─ impact_agent(fire_context, population) → impact analysis
-    ├─ evacuation_agent(fire_context) → evacuation analysis
+    ├─ return cached AI_report/summary.json if exists (all users); response includes has_crowd=true if summary_crowd.json also exists
+    ├─ if no cache and not admin → 403 {cached: false, error: "Report not yet generated."}
+    ├─ if admin (or force=true): load fire_context.json + population.json + roads.geojson + landmarks.json
+    ├─ [parallel] risk_agent(fire_context) + impact_agent(fire_context, population) + evacuation_agent(fire_context, road_summary, landmarks)
     ├─ summary_agent(risk, impact, evacuation) → situation overview
-    └─ write ai_summary.json → return JSON
+    └─ write AI_report/{risk,impact,evacuation,summary}.json → return JSON + has_crowd flag
+
+  POST /api/events/:id/timesteps/:ts_id/report-with-crowd  [admin only]
+    ├─ return cached AI_report/summary_crowd.json if exists (never overwrites summary.json)
+    ├─ if force=true: re-run all agents
+    ├─ [parallel] risk/impact/evacuation agents + run_crowd_analysis(field_reports in 24h window)
+    ├─ summary_agent(risk, impact, evacuation, crowd_analysis) → crowd-enriched overview
+    └─ write AI_report/{risk,impact,evacuation,crowd,summary_crowd}.json → return JSON + has_crowd=true
 ```
 
 ## Development Workflow

@@ -189,6 +189,37 @@
 
   // ── AI Analysis card ─────────────────────────────────────────────────────────
 
+  /**
+   * Try to load cached reports from server (standard + crowd if available).
+   * Silent — 403 means no cache yet, card stays idle.
+   */
+  async function _tryLoadCached() {
+    if (!_eid || !_tsid) return;
+    const myGenId = ++_genId;
+    try {
+      const report = await window.API.generateReport(_eid, _tsid);
+      if (myGenId !== _genId) return;
+      _reportData   = report;
+      _viewingCrowd = false;
+      _renderReport(report);
+      _renderInitialSuggestions();
+      _reportLoaded = true;
+      _cardState = 'done';
+      _updateCard();
+      _updateEnhanceBtn();
+      // Silently fetch crowd cache if server says it exists
+      if (report.has_crowd && !_reportDataCrowd) {
+        window.API.generateReportWithCrowd(_eid, _tsid).then(function(cr) {
+          _reportDataCrowd = cr;
+          _updateEnhanceBtn();
+        }).catch(function() {});
+      }
+    } catch(e) {
+      // 403 = not yet generated (non-admin): card stays idle — expected
+      if (myGenId !== _genId) return;
+    }
+  }
+
   /** Append AI Analysis card to #dashboard-content (call after renderDashboard). */
   function renderCard() {
     const content = document.getElementById('dashboard-content');
@@ -209,6 +240,8 @@
       if (e.target.closest('#ai-crowd-btn')) return;
       _onCardClick();
     });
+    // Auto-load from cache (all users — 403 silently ignored for non-admins)
+    _tryLoadCached();
   }
 
   function _updateCard() {
@@ -243,13 +276,13 @@
     // loading / crowd-loading: ignore
   }
 
-  async function _startGenerate() {
+  async function _startGenerate(force) {
     if (!_eid || !_tsid) return;
     _cardState = 'loading';
     _updateCard();
     const myGenId = ++_genId;
     try {
-      const report = await window.API.generateReport(_eid, _tsid);
+      const report = await window.API.generateReport(_eid, _tsid, force || false);
       if (myGenId !== _genId) return;
       _reportData   = report;
       _viewingCrowd = false;
@@ -260,6 +293,13 @@
       _updateCard();
       _updateEnhanceBtn();
       _showAIToast();
+      // If crowd report is cached on server, load it silently
+      if (report.has_crowd && !_reportDataCrowd) {
+        window.API.generateReportWithCrowd(_eid, _tsid).then(function(cr) {
+          _reportDataCrowd = cr;
+          _updateEnhanceBtn();
+        }).catch(function() {});
+      }
     } catch(e) {
       if (myGenId !== _genId) return;
       _cardState = 'idle';
@@ -272,7 +312,7 @@
     }
   }
 
-  async function _startGenerateWithCrowd() {
+  async function _startGenerateWithCrowd(force) {
     if (!_eid || !_tsid) return;
     _cardState = 'crowd-loading';
     _updateCard();
@@ -280,7 +320,7 @@
     if (enhBtn) { enhBtn.disabled = true; enhBtn.textContent = '⏳ Enhancing…'; }
     const myGenId = ++_genId;
     try {
-      const report = await window.API.generateReportWithCrowd(_eid, _tsid);
+      const report = await window.API.generateReportWithCrowd(_eid, _tsid, force || false);
       if (myGenId !== _genId) return;
       _reportDataCrowd = report;
       _viewingCrowd    = true;
@@ -348,7 +388,6 @@
   }
 
   function _renderReport(report) {
-    _reportData = report;
     const tabs = [
       { id: 'overview',   label: 'Overview' },
       { id: 'risk',       label: 'Risk' },

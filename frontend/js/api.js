@@ -63,11 +63,15 @@
       return apiFetch('/api/satellite/scene?event_id=' + eid + '&date=' + date);
     },
 
-    async generateReport(eid, tsid) {
-      return apiFetch('/api/events/' + eid + '/timesteps/' + tsid + '/report', { method: 'POST' });
+    async generateReport(eid, tsid, force) {
+      return apiFetch('/api/events/' + eid + '/timesteps/' + tsid + '/report', {
+        method: 'POST', body: force ? JSON.stringify({ force: true }) : undefined,
+      });
     },
-    async generateReportWithCrowd(eid, tsid) {
-      return apiFetch('/api/events/' + eid + '/timesteps/' + tsid + '/report-with-crowd', { method: 'POST' });
+    async generateReportWithCrowd(eid, tsid, force) {
+      return apiFetch('/api/events/' + eid + '/timesteps/' + tsid + '/report-with-crowd', {
+        method: 'POST', body: force ? JSON.stringify({ force: true }) : undefined,
+      });
     },
 
     async getWindRiskZones(eid, tsid) {

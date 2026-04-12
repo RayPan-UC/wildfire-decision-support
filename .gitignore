@@ -1,6 +1,11 @@
+# Agent / local notes (never commit)
+AGENT/
+
 .env
 .venv/
+venv/
 __pycache__/
+*.py[cod]
 
 # Downloaded static datasets (regenerate via: python pipeline.py download --all)
 data/static/*

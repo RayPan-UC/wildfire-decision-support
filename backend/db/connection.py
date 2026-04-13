@@ -76,7 +76,7 @@ def seed_db():
         print("[db] patched admin account: set is_admin=True")
 
     _SEED_NAME = 'Fort McMurray Wildfire 2016'
-    _SEED_END  = '2016-05-31'
+    _SEED_END  = '2016-05-10'
 
     if FireEvent.query.count() == 0:
         events = [

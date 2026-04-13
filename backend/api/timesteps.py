@@ -295,6 +295,74 @@ def _wipe_prediction_outputs(event, ts) -> None:
     _write_status(base / "spatial_analysis", "pending")
 
 
+# ── Build-all (SSE) ───────────────────────────────────────────────────────────
+
+@timesteps_bp.route("/events/<int:event_id>/build-all", methods=["POST"])
+@admin_required
+def build_all_predictions(event_id: int):
+    """SSE: run full prediction pipeline for all pending timesteps in an event.
+
+    Yields newline-delimited JSON events:
+        { total, done, current, status }   status = loading | running | done | error
+    """
+    import json as _json
+    import logging as _logging
+    import pandas as _pd
+    from db.models import FireEvent, EventTimestep
+
+    _log = _logging.getLogger(__name__)
+
+    event = FireEvent.query.get(event_id)
+    if not event:
+        return jsonify({"error": "event not found"}), 404
+
+    def _generate():
+        from pipeline.check.builder import (
+            _get_event_assets, _load_predictor, _load_threshold, _build_timestep,
+        )
+
+        timesteps = (
+            EventTimestep.query
+            .filter_by(event_id=event_id)
+            .order_by(EventTimestep.slot_time)
+            .all()
+        )
+
+        pending = [
+            ts for ts in timesteps
+            if _read_status(_ts_base(event.id, event.year, ts.slot_time) / "prediction" / "ML")
+               not in ("done", "running")
+        ]
+
+        total = len(pending)
+        yield f"data: {_json.dumps({'total': total, 'done': 0, 'status': 'loading'})}\n\n"
+
+        try:
+            assets    = _get_event_assets(event)
+            predictor = _load_predictor()
+            threshold = _load_threshold()
+        except Exception as exc:
+            _log.error("[build-all] setup failed: %s", exc)
+            yield f"data: {_json.dumps({'error': str(exc), 'status': 'error'})}\n\n"
+            return
+
+        for i, ts in enumerate(pending):
+            ts_label = _pd.Timestamp(ts.slot_time).strftime("%Y-%m-%d %H:%M")
+            yield f"data: {_json.dumps({'total': total, 'done': i, 'current': ts_label, 'status': 'running'})}\n\n"
+            try:
+                _build_timestep(event, ts, assets, predictor, threshold)
+            except Exception as exc:
+                _log.error("[build-all] ts %d failed: %s", ts.id, exc)
+
+        yield f"data: {_json.dumps({'total': total, 'done': total, 'status': 'done'})}\n\n"
+
+    return Response(
+        stream_with_context(_generate()),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 # ── Chat ──────────────────────────────────────────────────────────────────────
 
 @timesteps_bp.route("/events/<int:event_id>/chat", methods=["POST"])

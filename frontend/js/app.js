@@ -793,11 +793,12 @@
         var rerunBtn       = document.getElementById('dev-rerun-pred-btn');
         var rerunRptBtn    = document.getElementById('dev-rerun-report-btn');
         var rerunRptCrwBtn = document.getElementById('dev-rerun-report-crowd-btn');
-        var simBtn         = document.getElementById('dev-sim-btn');
+        var buildAllBtn    = document.getElementById('dev-build-all-btn');
         if (runBtn)         runBtn.disabled         = !currentEvent;
         if (rerunBtn)       rerunBtn.disabled       = !currentEvent;
         if (rerunRptBtn)    rerunRptBtn.disabled    = !currentEvent;
         if (rerunRptCrwBtn) rerunRptCrwBtn.disabled = !currentEvent;
+        if (buildAllBtn)    buildAllBtn.disabled    = !currentEvent;
         _updateSimBtnState();
       }
     });
@@ -1035,6 +1036,71 @@
           if (status) status.textContent = 'Error: ' + (err.message || 'unknown');
           btn.disabled = false;
         });
+    });
+
+    // ── Build All Slots ──────────────────────────────────────────────────────
+    document.getElementById('dev-build-all-btn') && document.getElementById('dev-build-all-btn').addEventListener('click', function() {
+      if (!currentEvent) { showToast('No event selected', 'error'); return; }
+      var btn      = this;
+      var progress = document.getElementById('dev-build-all-progress');
+      var fill     = document.getElementById('dev-build-all-fill');
+      var label    = document.getElementById('dev-build-all-label');
+
+      btn.disabled = true;
+      if (progress) progress.classList.remove('hidden');
+      if (label)    label.textContent = 'Loading…';
+      if (fill)     fill.style.width  = '0%';
+
+      var token = localStorage.getItem('wf_token');
+      fetch(window.API.BASE + '/api/events/' + currentEvent.id + '/build-all', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + token },
+      }).then(function(res) {
+        if (!res.ok) { throw new Error('HTTP ' + res.status); }
+        var reader  = res.body.getReader();
+        var decoder = new TextDecoder();
+        var buf     = '';
+
+        function _read() {
+          return reader.read().then(function(chunk) {
+            if (chunk.done) {
+              btn.disabled = false;
+              showToast('All slots built', 'success');
+              return;
+            }
+            buf += decoder.decode(chunk.value, { stream: true });
+            var lines = buf.split('\n');
+            buf = lines.pop();
+            lines.forEach(function(line) {
+              if (!line.startsWith('data:')) return;
+              try {
+                var d = JSON.parse(line.slice(5).trim());
+                if (d.status === 'error') {
+                  if (label) label.textContent = 'Error: ' + (d.error || 'unknown');
+                  btn.disabled = false;
+                  return;
+                }
+                var pct = d.total > 0 ? Math.round((d.done / d.total) * 100) : 0;
+                if (fill)  fill.style.width  = pct + '%';
+                if (label) {
+                  if (d.status === 'done') {
+                    label.textContent = 'Done — ' + d.total + ' slot(s) processed';
+                  } else if (d.status === 'loading') {
+                    label.textContent = 'Loading assets…';
+                  } else {
+                    label.textContent = (d.done || 0) + ' / ' + (d.total || '?') + (d.current ? '  ' + d.current : '');
+                  }
+                }
+              } catch(e) {}
+            });
+            return _read();
+          });
+        }
+        return _read();
+      }).catch(function(err) {
+        if (label) label.textContent = 'Error: ' + (err.message || 'unknown');
+        btn.disabled = false;
+      });
     });
   }
 

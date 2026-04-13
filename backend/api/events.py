@@ -8,8 +8,8 @@ from shapely.geometry import mapping
 from db.models import FireEvent
 from utils.auth_middleware import token_required
 
-# In-memory shared replay clock: {event_id: ms_timestamp}
-_replay_times: dict[int, int] = {}
+# In-memory shared replay clock: {event_id: {ms, pushed_at, speed}}
+_replay_times: dict[int, dict] = {}
 
 events_bp = Blueprint('events', __name__)
 
@@ -102,14 +102,15 @@ def get_replay_time(event_id: int):
     In-memory cache is checked first (avoids a DB hit on every 10-second poll).
     Falls back to FireEvent.replay_ms so the value survives server restarts.
     """
-    ms = _replay_times.get(event_id)
-    if ms is None:
+    entry = _replay_times.get(event_id)
+    if entry is None:
         from db.models import FireEvent
         event = FireEvent.query.get(event_id)
         if event and event.replay_ms is not None:
-            ms = event.replay_ms
-            _replay_times[event_id] = ms   # warm the cache
-    return jsonify({'ms': ms}), 200
+            import time as _time
+            entry = {'ms': event.replay_ms, 'pushed_at': _time.time() * 1000, 'speed': 1}
+            _replay_times[event_id] = entry
+    return jsonify(entry or {}), 200
 
 
 @events_bp.route('/<int:event_id>/replay-time', methods=['POST'])
@@ -128,11 +129,16 @@ def set_replay_time(event_id: int):
     except Exception:
         return jsonify({'error': 'unauthorized'}), 401
 
+    import time as _time
     data = request.get_json(force=True) or {}
     ms = data.get('ms')
     if not isinstance(ms, (int, float)):
         return jsonify({'error': 'ms required'}), 400
-    _replay_times[event_id] = int(ms)
+    _replay_times[event_id] = {
+        'ms':        int(ms),
+        'pushed_at': _time.time() * 1000,
+        'speed':     data.get('speed', 1),
+    }
 
     # Persist to DB so the value survives server restarts
     from db.connection import db

@@ -42,7 +42,7 @@
     logout() { localStorage.removeItem('wf_token'); },
 
     async getReplayTime(eid)     { return apiFetch('/api/events/' + eid + '/replay-time'); },
-    async setReplayTime(eid, ms) { return apiFetch('/api/events/' + eid + '/replay-time', { method: 'POST', body: JSON.stringify({ ms }) }); },
+    async setReplayTime(eid, ms, speed) { return apiFetch('/api/events/' + eid + '/replay-time', { method: 'POST', body: JSON.stringify({ ms, speed: speed || 1 }) }); },
 
     async getEvents()        { return apiFetch('/api/events/'); },
     async getAoi(eid)        { return apiFetch('/api/events/' + eid + '/layers/aoi'); },

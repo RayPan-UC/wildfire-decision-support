@@ -103,6 +103,7 @@
   function goHome(fromPopstate) {
     currentEvent = null;
     if (_syncPushInterval) { clearInterval(_syncPushInterval); _syncPushInterval = null; }
+    if (window._syncRefetchInterval) { clearInterval(window._syncRefetchInterval); window._syncRefetchInterval = null; }
     window.Dashboard.clearDashboard();
     window.AIModal.setContext(null, null);
     window.AIModal.close();
@@ -189,23 +190,44 @@
     }).catch(function(){});
 
     if (_isAdmin) {
-      // Admin: push virtual time to server every 10s as clock advances
+      // Admin: push virtual time + speed to server every 10s
       if (_syncPushInterval) clearInterval(_syncPushInterval);
       _syncPushInterval = setInterval(function() {
-        if (currentEvent) window.API.setReplayTime(currentEvent.id, _replayVirtualTime).catch(function(){});
+        if (currentEvent) window.API.setReplayTime(currentEvent.id, _replayVirtualTime, _replaySpeed).catch(function(){});
       }, 10000);
     } else {
-      // Non-admin: pull server time every 10s to stay in sync with admin
+      // Non-admin: get reference point from server, then interpolate locally every second.
+      // Re-sync reference every 15s to correct drift.
       if (_syncPushInterval) clearInterval(_syncPushInterval);
+      var _syncRef = null; // {ms, pushed_at, speed}
+      function _applySyncRef(d) {
+        if (!d || !d.ms || !d.pushed_at) return;
+        _syncRef = d;
+      }
+      function _syncTick() {
+        if (!_syncRef) return;
+        var elapsed = Date.now() - _syncRef.pushed_at;
+        var computed = _syncRef.ms + elapsed * (_syncRef.speed || 1);
+        if (Math.abs(computed - _replayVirtualTime) > 500) {
+          _replayVirtualTime = computed;
+          _devApplyReplayTime();
+        }
+      }
+      // Initial fetch
+      if (currentEvent) {
+        window.API.getReplayTime(currentEvent.id).then(_applySyncRef).catch(function(){});
+      }
+      // Tick every second for smooth updates
       _syncPushInterval = setInterval(function() {
+        _syncTick();
+      }, 1000);
+      // Re-fetch reference every 15s
+      var _syncRefetchInterval = setInterval(function() {
         if (!currentEvent) return;
-        window.API.getReplayTime(currentEvent.id).then(function(d) {
-          if (d.ms && d.ms !== _replayVirtualTime) {
-            _replayVirtualTime = d.ms;
-            _devApplyReplayTime();
-          }
-        }).catch(function(){});
-      }, 10000);
+        window.API.getReplayTime(currentEvent.id).then(_applySyncRef).catch(function(){});
+      }, 15000);
+      // Store refetch interval so it gets cleared on event change
+      window._syncRefetchInterval = _syncRefetchInterval;
     }
   }
 

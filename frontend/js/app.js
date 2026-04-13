@@ -205,12 +205,29 @@
         _syncRef = d;
       }
       function _syncTick() {
-        if (!_syncRef) return;
-        var elapsed = Date.now() - _syncRef.pushed_at;
+        if (!_syncRef || !_timestepsDone.length) return;
+        var elapsed  = Date.now() - _syncRef.pushed_at;
         var computed = _syncRef.ms + elapsed * (_syncRef.speed || 1);
-        if (Math.abs(computed - _replayVirtualTime) > 500) {
-          _replayVirtualTime = computed;
-          _devApplyReplayTime();
+        if (Math.abs(computed - _replayVirtualTime) < 500) return;
+        _replayVirtualTime = computed;
+
+        // Update label
+        var label = document.getElementById('ts-label');
+        if (label) label.textContent = fmtDateTime(new Date(_replayVirtualTime).toISOString());
+
+        // Find which timestep we should be on
+        var newIdx = 0;
+        for (var i = 0; i < _timestepsDone.length; i++) {
+          if (new Date(_timestepsDone[i].slot_time).getTime() <= _replayVirtualTime) newIdx = i;
+          else break;
+        }
+        // Only selectTimestep when the index actually changes
+        if (newIdx !== _replayIdx) {
+          _replayIdx = newIdx;
+          _currentTsIndex = newIdx;
+          setGapBadge(_timestepsDone[newIdx]);
+          _highlightTick(newIdx);
+          selectTimestep(_timestepsDone[newIdx]);
         }
       }
       // Initial fetch

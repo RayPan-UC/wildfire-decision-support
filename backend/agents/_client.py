@@ -54,7 +54,7 @@ _GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
 
 def _gemini_call(system: str, user_msg: str) -> str:
     import requests
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{_GEMINI_MODEL}:generateContent"
+    url = f"https://generativelanguage.googleapis.com/v1/models/{_GEMINI_MODEL}:generateContent"
     body = {
         "system_instruction": {"parts": [{"text": system}]},
         "contents": [{"role": "user", "parts": [{"text": user_msg}]}],
@@ -73,7 +73,7 @@ def _gemini_stream(system: str, messages: list[dict]) -> Generator[str, None, No
     """
     import requests, json as _json
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{_GEMINI_MODEL}:streamGenerateContent"
+    url = f"https://generativelanguage.googleapis.com/v1/models/{_GEMINI_MODEL}:streamGenerateContent"
     contents = [
         {
             "role": "model" if m["role"] == "assistant" else "user",

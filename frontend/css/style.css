@@ -1138,3 +1138,156 @@ select.crowd-input { resize: none; }
   cursor: pointer; flex-shrink: 0; transition: background .12s;
 }
 .cr-comment-submit:hover { background: #e05a1a; }
+
+/* ══════════════════════════════════════════════════════════
+   MOBILE  ≤ 768 px
+══════════════════════════════════════════════════════════ */
+
+/* Mobile FAB + backdrop — hidden on desktop */
+#mobile-fab        { display: none; }
+#mobile-panel-backdrop { display: none; }
+
+@media (max-width: 768px) {
+
+  /* ── Variables ── */
+  :root { --left-w: 0px; }
+
+  /* ── Header ── */
+  .logo-text       { display: none; }
+  .dev-toggle-btn  { display: none; }
+  #auth-user-label { display: none; }
+  #breadcrumb      { display: none !important; }
+  #header          { padding: 0 8px; gap: 5px; }
+  .header-btn      { padding: 4px 9px; font-size: 11px; }
+
+  /* ── Home View: sidebar → bottom sheet ── */
+  .home-sidebar {
+    position: fixed !important;
+    top: auto !important; bottom: 0 !important;
+    left: 0 !important; right: 0 !important;
+    width: 100% !important;
+    max-height: 240px;
+    border-radius: 12px 12px 0 0;
+    border-left: none; border-right: none; border-bottom: none;
+    border-top: 2px solid var(--accent);
+    z-index: 600;
+  }
+  .map-overlay { right: 8px; top: calc(var(--header-h) + 8px); padding: 6px 9px; }
+  .legend-title { font-size: 10px; }
+  .legend-row   { font-size: 10px; }
+
+  /* ── Event View ── */
+  #event-body { position: relative; }
+
+  /* Left panel → full-width bottom sheet, hidden by default */
+  #left-panel {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    width: 100% !important;
+    max-height: 72vh;
+    overflow-y: auto;
+    z-index: 660;
+    border-right: none;
+    border-top: 2px solid var(--accent);
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -6px 30px rgba(0,0,0,.55);
+    transform: translateY(100%);
+    transition: transform 0.28s cubic-bezier(.4,0,.2,1);
+  }
+  #left-panel.mobile-open { transform: translateY(0); }
+
+  /* Map: full width */
+  #event-map-wrap { width: 100%; }
+  #event-legend   { top: calc(var(--header-h) + 8px); left: 8px; right: auto; padding: 6px 8px; }
+  .leg-row        { font-size: 9px; margin-bottom: 3px; }
+
+  /* Prediction status bar: above bottom panel */
+  #prediction-status-bar { bottom: calc(var(--dash-h) + 10px); }
+
+  /* ── Bottom panel: compact ── */
+  #bottom-panel   { height: var(--dash-h); }
+  .dash-card      { min-width: 160px; }
+  .dash-card-wide { min-width: 200px; }
+
+  /* ── Mobile FAB — toggle left panel ── */
+  #mobile-fab {
+    display: flex !important;
+    position: fixed;
+    bottom: calc(var(--dash-h) + 14px);
+    right: 14px;
+    z-index: 700;
+    width: 48px; height: 48px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    align-items: center; justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 4px 18px rgba(255,107,53,.5);
+    transition: background .15s, transform .15s;
+  }
+  #mobile-fab:active   { transform: scale(.91); }
+  #mobile-fab.active   { background: var(--surface2); color: var(--text); box-shadow: 0 2px 10px rgba(0,0,0,.4); }
+
+  /* ── Backdrop ── */
+  #mobile-panel-backdrop {
+    display: block;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.5);
+    z-index: 650;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s;
+  }
+  #mobile-panel-backdrop.visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* ── AI Modal: full screen, stacked layout ── */
+  #ai-modal {
+    width: 100vw !important;
+    height: 100vh !important;
+    border-radius: 0;
+    border: none;
+  }
+  .ai-modal-header { padding: 10px 12px; }
+  .ai-modal-title  { font-size: 13px; }
+  .ai-enhance-btn  { display: none; }   /* hide on mobile, use AI tab instead */
+
+  .ai-modal-body {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .ai-col-divider {
+    width: 100%; height: 1px; flex-shrink: 0;
+  }
+  #ai-report-col {
+    flex: none;
+    min-height: 50vh;
+    padding: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  #ai-chat-col {
+    width: 100%;
+    flex: 1;
+    min-height: 300px;
+  }
+
+  /* ── Auth modal ── */
+  #auth-modal {
+    width: 94vw;
+    padding: 16px;
+  }
+
+  /* ── Crowd panel ── */
+  .crowd-panel {
+    width: 100% !important;
+    max-width: 100% !important;
+    left: 0 !important; right: 0 !important;
+    bottom: 0 !important; top: auto !important;
+    border-radius: 14px 14px 0 0;
+    border-bottom: none;
+    max-height: 70vh;
+  }
+}

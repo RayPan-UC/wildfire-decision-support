@@ -50,6 +50,7 @@
     window.AIModal.init();
     window.Dashboard.clearDashboard();
     if (window.CrowdPanel) window.CrowdPanel.init();
+    initMobileFAB();
 
     document.getElementById('nav-home-btn')?.addEventListener('click', function() { goHome(); });
 
@@ -491,6 +492,9 @@
     const eid  = currentEvent.id;
     const tsid = ts.id;
 
+    // On mobile, close the left-panel sheet after picking a timestep
+    if (window._mobileClosePanel) window._mobileClosePanel();
+
     _updateSimBtnState();
     eventMap.clearLayers();
     _hideForecastSlider();
@@ -599,6 +603,36 @@
       _initForecastSlider(forecast);
       window.Dashboard.updateWeather(forecast);
     });
+  }
+
+  // ── Mobile FAB ───────────────────────────────────────────────────────────────
+
+  function initMobileFAB() {
+    var fab      = document.getElementById('mobile-fab');
+    var backdrop = document.getElementById('mobile-panel-backdrop');
+    var panel    = document.getElementById('left-panel');
+    if (!fab || !panel) return;
+
+    function _openPanel() {
+      panel.classList.add('mobile-open');
+      fab.classList.add('active');
+      if (backdrop) backdrop.classList.add('visible');
+    }
+    function _closePanel() {
+      panel.classList.remove('mobile-open');
+      fab.classList.remove('active');
+      if (backdrop) backdrop.classList.remove('visible');
+    }
+    function _togglePanel() {
+      if (panel.classList.contains('mobile-open')) _closePanel();
+      else _openPanel();
+    }
+
+    fab.addEventListener('click', _togglePanel);
+    backdrop && backdrop.addEventListener('click', _closePanel);
+
+    // Expose so selectTimestep can close the panel after picking a slot
+    window._mobileClosePanel = _closePanel;
   }
 
   // ── Theme ─────────────────────────────────────────────────────────────────────

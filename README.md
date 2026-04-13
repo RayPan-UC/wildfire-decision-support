@@ -2,7 +2,7 @@
 
 An AI-powered wildfire situational awareness platform built for emergency managers. The system combines satellite hotspot data, machine learning fire spread prediction, and real-time crowd intelligence to generate structured situational briefings and support evacuation decision-making.
 
-> Built for **ENGO 651 — Advanced Geospatial Web Technology (AI Track)**, University of Calgary, 2025.
+> Built for **ENGO 651 — Advanced Geospatial Topics**, University of Calgary, 2025.
 
 **Live demo:** https://wildfire-ai.com/demo
 

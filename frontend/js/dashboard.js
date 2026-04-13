@@ -181,10 +181,14 @@
   }
 
   // Called when weather/forecast.json arrives (async, after renderDashboard)
-  function updateWeather(weatherForecast) {
+  function updateWeather(weatherForecast, _attempt) {
+    if (!weatherForecast || !weatherForecast.length) return;
     const sparkEl = document.getElementById('dash-wind-sparkline');
     const labsEl  = document.getElementById('dash-wind-labels');
-    if (!sparkEl || !labsEl || !weatherForecast || !weatherForecast.length) return;
+    if (!sparkEl || !labsEl) {
+      if ((_attempt || 0) < 15) setTimeout(function() { updateWeather(weatherForecast, (_attempt || 0) + 1); }, 100);
+      return;
+    }
     sparkEl.innerHTML = windSparkline(weatherForecast);
     labsEl.innerHTML  = weatherForecast.filter((_, i) => i % 3 === 0).map(f => {
       const spd = (f.wind_speed_kmh || f.speed_kmh);

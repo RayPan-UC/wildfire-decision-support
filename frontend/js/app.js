@@ -641,28 +641,25 @@
       _loadActualPerimeter(ts);
     }
 
-    // Dashboard (non-blocking)
+    // Dashboard + Weather: all together so weather renders into already-created DOM
     Promise.allSettled([
       window.API.getAnalysis(eid, tsid),
       window.API.getFireContext(eid, tsid),
-    ]).then(function(r) {
-      window.Dashboard.renderDashboard(
-        r[0].status === 'fulfilled' ? r[0].value : null,
-        r[1].status === 'fulfilled' ? r[1].value : null,
-      );
-      window.AIModal.renderCard();
-    });
-
-    // Weather forecast + wind field (non-blocking)
-    Promise.allSettled([
       window.API.getWeather(eid, tsid),
       window.API.getWindField(eid, tsid),
     ]).then(function(r) {
-      var forecast   = r[0].status === 'fulfilled' ? r[0].value : [];
-      var windHours  = r[1].status === 'fulfilled' ? r[1].value : [];
+      var forecast  = r[2].status === 'fulfilled' ? r[2].value : [];
+      var windHours = r[3].status === 'fulfilled' ? r[3].value : [];
+      // renderDashboard first (creates the DOM elements), then update weather into them
+      window.Dashboard.renderDashboard(
+        r[0].status === 'fulfilled' ? r[0].value : null,
+        r[1].status === 'fulfilled' ? r[1].value : null,
+        forecast,
+      );
+      window.Dashboard.updateWeather(forecast);
       eventMap && eventMap.loadWindField(windHours);
       _initForecastSlider(forecast);
-      window.Dashboard.updateWeather(forecast);
+      window.AIModal.renderCard();
     });
   }
 

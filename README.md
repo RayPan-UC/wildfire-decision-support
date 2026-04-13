@@ -4,6 +4,8 @@ An AI-powered wildfire situational awareness platform built for emergency manage
 
 > Built for **ENGO 651 — Advanced Geospatial Web Technology (AI Track)**, University of Calgary, 2025.
 
+**Live demo:** https://wildfire-ai.com/demo
+
 ---
 
 ## Screenshots

@@ -60,7 +60,8 @@ def _gemini_call(system: str, user_msg: str) -> str:
         "contents": [{"role": "user", "parts": [{"text": user_msg}]}],
     }
     res = requests.post(url, params={"key": os.environ["GEMINI_API_KEY"]}, json=body, timeout=120)
-    res.raise_for_status()
+    if not res.ok:
+        raise RuntimeError(f"Gemini API error: HTTP {res.status_code}")
     return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
 
 
@@ -91,7 +92,8 @@ def _gemini_stream(system: str, messages: list[dict]) -> Generator[str, None, No
         stream=True,
         timeout=120,
     ) as res:
-        res.raise_for_status()
+        if not res.ok:
+            raise RuntimeError(f"Gemini API error: HTTP {res.status_code}")
         for raw in res.iter_lines():
             if not raw:
                 continue

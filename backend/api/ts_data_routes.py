@@ -278,7 +278,8 @@ def generate_report(event_id: int, ts_id: int):
 
         overview = run_summary_agent(risk_data, impact_data, evac_data)
     except Exception as e:
-        return jsonify({"error": f"AI agent failed: {e}"}), 502
+        import logging; logging.getLogger(__name__).error("AI agent failed: %s", e)
+        return jsonify({"error": "AI report generation failed. Check server logs."}), 502
 
     _save_ai_report(ai_dir, risk_data, impact_data, evac_data, overview)
 
@@ -370,7 +371,8 @@ def generate_report_with_crowd(event_id: int, ts_id: int):
 
         overview = run_summary_agent(risk_data, impact_data, evac_data, crowd_analysis=crowd_data)
     except Exception as e:
-        return jsonify({"error": f"AI agent failed: {e}"}), 502
+        import logging; logging.getLogger(__name__).error("AI agent failed: %s", e)
+        return jsonify({"error": "AI report generation failed. Check server logs."}), 502
 
     _save_ai_report(ai_dir, risk_data, impact_data, evac_data, overview, crowd=crowd_data, crowd_run=True)
 

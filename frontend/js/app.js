@@ -51,6 +51,8 @@
     window.Dashboard.clearDashboard();
     if (window.CrowdPanel) window.CrowdPanel.init();
     initMobileFAB();
+    initLeftPanelCollapse();
+    initChatColCollapse();
 
     document.getElementById('nav-home-btn')?.addEventListener('click', function() { goHome(); });
 
@@ -605,23 +607,47 @@
     });
   }
 
+  // ── Chat column collapse ──────────────────────────────────────────────────────
+
+  function initChatColCollapse() {
+    var btn = document.getElementById('chat-col-collapse-btn');
+    var col = document.getElementById('ai-chat-col');
+    if (!btn || !col) return;
+    function _toggle() { col.classList.toggle('chat-collapsed'); }
+    btn.addEventListener('click', _toggle);
+    // Clicking the title bar also expands when collapsed
+    col.querySelector('.chat-col-title').addEventListener('click', function(e) {
+      if (col.classList.contains('chat-collapsed') && e.target !== btn && !btn.contains(e.target)) _toggle();
+    });
+  }
+
+  // ── Left panel collapse ───────────────────────────────────────────────────────
+
+  function initLeftPanelCollapse() {
+    var btn   = document.getElementById('lp-collapse-btn');
+    var panel = document.getElementById('left-panel');
+    if (!btn || !panel) return;
+    btn.addEventListener('click', function() {
+      panel.classList.toggle('lp-collapsed');
+      // Trigger map resize so Leaflet redraws to the new width
+      setTimeout(function() { eventMap && eventMap.map.invalidateSize(); }, 240);
+    });
+  }
+
   // ── Mobile FAB ───────────────────────────────────────────────────────────────
 
   function initMobileFAB() {
-    var fab      = document.getElementById('mobile-fab');
-    var backdrop = document.getElementById('mobile-panel-backdrop');
-    var panel    = document.getElementById('left-panel');
+    var fab   = document.getElementById('mobile-fab');
+    var panel = document.getElementById('left-panel');
     if (!fab || !panel) return;
 
     function _openPanel() {
       panel.classList.add('mobile-open');
-      fab.classList.add('active');
-      if (backdrop) backdrop.classList.add('visible');
+      fab.classList.add('panel-open');
     }
     function _closePanel() {
       panel.classList.remove('mobile-open');
-      fab.classList.remove('active');
-      if (backdrop) backdrop.classList.remove('visible');
+      fab.classList.remove('panel-open');
     }
     function _togglePanel() {
       if (panel.classList.contains('mobile-open')) _closePanel();
@@ -629,7 +655,12 @@
     }
 
     fab.addEventListener('click', _togglePanel);
-    backdrop && backdrop.addEventListener('click', _closePanel);
+
+    // Close panel when tapping the map area
+    var mapWrap = document.getElementById('event-map-wrap');
+    if (mapWrap) mapWrap.addEventListener('click', function() {
+      if (panel.classList.contains('mobile-open')) _closePanel();
+    });
 
     // Expose so selectTimestep can close the panel after picking a slot
     window._mobileClosePanel = _closePanel;

@@ -57,6 +57,9 @@
 
     <!-- Left panel -->
     <aside id="left-panel">
+      <button id="lp-collapse-btn" class="lp-collapse-btn" title="Collapse panel">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
       <div class="lp-section-title">Timestep Replay</div>
       <div id="timestep-slider-section">
         <div class="empty-msg">Loading…</div>
@@ -180,7 +183,12 @@
 
       <!-- Right: chat -->
       <div id="ai-chat-col">
-        <div class="chat-col-title">Chat</div>
+        <div class="chat-col-title">
+          Chat
+          <button id="chat-col-collapse-btn" class="chat-col-collapse-btn" title="Collapse chat">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+        </div>
         <div id="chat-messages">
           <div class="chat-welcome">Ask anything about this fire event and the AI analysis above.</div>
         </div>

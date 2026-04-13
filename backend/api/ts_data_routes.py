@@ -185,6 +185,9 @@ def _load_ai_report(ai_dir: Path) -> dict | None:
         p = ai_dir / f"{name}.json"
         if p.exists():
             out[name] = json.loads(p.read_text(encoding="utf-8"))
+    crowd_path = ai_dir / "crowd.json"
+    if crowd_path.exists():
+        out["crowd"] = json.loads(crowd_path.read_text(encoding="utf-8"))
     return out
 
 
@@ -283,7 +286,7 @@ def generate_report(event_id: int, ts_id: int):
 
     _save_ai_report(ai_dir, risk_data, impact_data, evac_data, overview)
 
-    return jsonify({
+    resp = {
         "risk_level":        overview.get("risk_level", "Unknown"),
         "key_points":        overview.get("key_points", []),
         "situation":         overview.get("situation", ""),
@@ -293,7 +296,11 @@ def generate_report(event_id: int, ts_id: int):
         "impact":            impact_data,
         "evacuation":        evac_data,
         "has_crowd":         (ai_dir / "summary_crowd.json").exists(),
-    }), 200
+    }
+    crowd_path = ai_dir / "crowd.json"
+    if crowd_path.exists():
+        resp["crowd"] = json.loads(crowd_path.read_text(encoding="utf-8"))
+    return jsonify(resp), 200
 
 
 @timesteps_bp.route("/events/<int:event_id>/timesteps/<int:ts_id>/report-with-crowd", methods=["POST"])

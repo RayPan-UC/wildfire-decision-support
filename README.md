@@ -35,7 +35,7 @@ AI-synthesized crowd intelligence: urgent help requests, fire observations, and 
 ## Features
 
 ### Fire Spread Prediction
-- XGBoost ML model trained on VIIRS FIRMS hotspot + ERA5 weather data
+- Logistic Regression ML model trained on VIIRS FIRMS hotspot + ERA5 weather data
 - Predicts fire perimeter at +3h / +6h / +12h horizons
 - Wind-driven analytical model as an alternative projection
 - Crowd-augmented prediction: field reports inject additional hotspot anchors
@@ -93,7 +93,7 @@ Flask REST API  ─────────────────────�
 Pipeline (background thread)                                                  │
     ├── ERA5 weather download → forecast.json + wind_field.json               │
     ├── FIRMS hotspot fetch + crowd hotspot augmentation                      │
-    ├── ML inference (XGBoost) → perimeter + risk zones (GeoJSON)             │
+    ├── ML inference (Logistic Regression) → perimeter + risk zones (GeoJSON)             │
     └── Spatial analysis → road status + population counts                    │
                                                                               │
 AI Agents (on-demand)                                                         │
@@ -107,7 +107,7 @@ AI Agents (on-demand)                                                         �
 | Layer | Technology |
 |---|---|
 | Backend | Python 3.11, Flask, SQLAlchemy, PostgreSQL + PostGIS |
-| ML / Spatial | XGBoost, scikit-learn, GeoPandas, Rasterio, Shapely |
+| ML / Spatial | Logistic Regression, scikit-learn, GeoPandas, Rasterio, Shapely |
 | Weather | ERA5 via CDS API, VIIRS FIRMS |
 | AI | Anthropic Claude API (configurable to Gemini) |
 | Frontend | Vanilla JS, Leaflet.js, CSS custom properties |

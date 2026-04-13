@@ -319,6 +319,14 @@
             selectTimestep(done[nextIdx]);
             _highlightTick(nextIdx);
           }
+        } else if (_isAdmin) {
+          // Admin: loop back to first timestep
+          _replayVirtualTime = new Date(done[0].slot_time).getTime();
+          _replayIdx = 0;
+          _currentTsIndex = 0;
+          setGapBadge(done[0]);
+          selectTimestep(done[0]);
+          _highlightTick(0);
         } else {
           stopPlay();
         }

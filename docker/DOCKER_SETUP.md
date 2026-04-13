@@ -1,8 +1,8 @@
-# Wildfire Spread AI — Docker Setup Guide
+# Wildfire Decision Support — Docker Setup Guide
 
 ## Prerequisites
 
-- Install [Docker Desktop](https://www.docker.com/products/docker-desktop) (Windows/Mac)
+- Install [Docker Desktop](https://www.docker.com/products/docker-desktop) (Windows/Mac) or Docker Engine (Linux)
 - Launch Docker Desktop and confirm the icon in the system tray shows **Running** (green)
 
 ---
@@ -13,13 +13,16 @@ The `.env` file must be in the **project root** (not inside `docker/`).
 Copy the example file to create your own:
 
 ```bash
-# Run from the project root (wildfire-spread-ai/)
+# Run from the project root (wildfire-decision-support/)
 cp .env.example .env
 ```
 
-Open `.env` and update as needed:
+Open `.env` and update the following:
 
 ```env
+# Admin account (seeded on first startup)
+ADMIN_PASSWORD=change-me-before-deploy
+
 # Flask Backend
 DB_NAME=wildfire_db
 DB_USER=postgres
@@ -30,13 +33,28 @@ SECRET_KEY=some_long_random_str  # always change for production
 POSTGRES_DB=wildfire_db
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=your_password  # must be identical to DB_PASSWORD
+
+# LLM Provider — "claude" (default) or "gemini"
+LLM_PROVIDER=claude
+ANTHROPIC_API_KEY=your_anthropic_api_key
+GEMINI_API_KEY=your_gemini_api_key   # only needed if LLM_PROVIDER=gemini
+
+# Optional integrations
+SENTINELHUB_CLIENT_ID=...       # Sentinel-2 satellite basemap
+SENTINELHUB_CLIENT_SECRET=...
+FIRMS_API_KEY=...               # NASA FIRMS active fire data
+CDS_KEY=...                     # Copernicus ERA5-Land weather data
+EARTHDATA_TOKEN=...             # NASA VIIRS cloud mask (optional)
 ```
+
+> See `.env.example` for full documentation on each key and where to obtain them.
 
 ---
 
-## Step 2: First-Time Startup
+## Development Setup
 
-`docker-compose.yml` is inside the `docker/` folder. Run all commands from there:
+`docker-compose.yml` runs two services: `db` and `backend`.  
+Backend and frontend source files are mounted as volumes so edits take effect without rebuilding.
 
 ```bash
 cd docker
@@ -45,44 +63,70 @@ docker compose up --build
 
 > `--build` is required the first time. Subsequent restarts don't need it unless you change `Dockerfile` or `requirements.txt`.
 
-On first startup, Docker will:
+On first startup Docker will:
 1. Download `postgis/postgis:16-3.4` and `python:3.11-slim` (~500 MB, requires internet)
-2. Run `init.sql` to create the users table automatically
-3. Start 2 services: `db` / `backend`
+2. Run `init.sql` to create the database schema automatically
+3. Seed the admin account using `ADMIN_PASSWORD` from `.env`
 
 When everything is ready you should see:
 ```
 backend-1  |  * Running on http://0.0.0.0:5000
 ```
 
----
-
-## Step 3: Accessing the Services
+### Dev Services
 
 | Service | URL |
 |---|---|
 | Flask backend | http://localhost:5000 |
 | PostgreSQL | localhost:5432 (credentials from `.env`) |
 
-### API Examples (curl or Postman)
+---
+
+## Production Setup
+
+Production uses `docker-compose.prod.yml`, which adds a **Caddy** reverse proxy for HTTPS.
+
+### 1. Edit Caddyfile
+
+Replace `YOUR_DOMAIN` in `docker/Caddyfile` with your actual domain or server IP:
+
+```
+# Domain (Caddy auto-obtains Let's Encrypt TLS certificate)
+wildfire.yourdomain.com { ... }
+
+# IP only (no TLS)
+http://1.2.3.4 { ... }
+```
+
+### 2. Deploy with deploy.sh
+
+Run from your **local machine**:
 
 ```bash
-# Register
-curl -X POST http://localhost:5000/api/auth/register \
-     -H "Content-Type: application/json" \
-     -d '{"username":"test","password":"123456"}'
-
-# Login
-curl -X POST http://localhost:5000/api/auth/login \
-     -H "Content-Type: application/json" \
-     -d '{"username":"test","password":"123456"}'
+bash docker/deploy.sh <server-ip> [ssh-user]
+# e.g.
+bash docker/deploy.sh 1.2.3.4 root
 ```
+
+The script will:
+1. Rsync `data/events/2016_0001/` to the server (skips files already present)
+2. Clone or pull the latest code on the server
+3. Upload your local `.env` to the server
+4. Rebuild and restart the Docker stack with `docker-compose.prod.yml`
+
+### Production Services
+
+| Service | Details |
+|---|---|
+| Caddy | Ports 80 / 443, handles TLS + reverse proxy |
+| Flask backend | Internal only (not exposed to host) |
+| PostgreSQL | Internal only |
 
 ---
 
 ## Common Commands
 
-> All commands run from `wildfire-spread-ai/docker/`
+> All commands run from `wildfire-decision-support/docker/`
 
 ```bash
 # Run in background (detached mode)
@@ -106,6 +150,10 @@ docker compose up --build backend
 
 # Open a database shell
 docker compose exec db psql -U postgres -d wildfire_db
+
+# Production equivalents — append -f docker-compose.prod.yml
+docker compose -f docker-compose.prod.yml logs -f backend
+docker compose -f docker-compose.prod.yml down -v
 ```
 
 ---
@@ -124,8 +172,11 @@ ports: "5433:5432"
 **`backend: Connection refused (cannot reach db)`**  
 The DB may still be initializing. Wait a few seconds — the backend will retry. Check: `docker compose logs db`
 
-**`users table does not exist (init.sql not executed)`**  
+**`relation "..." does not exist` (init.sql not executed)**  
 PostgreSQL skips `init.sql` when a volume already exists. Run:
 ```bash
 docker compose down -v && docker compose up --build
 ```
+
+**`ANTHROPIC_API_KEY` / `GEMINI_API_KEY` errors**  
+Ensure the correct key is set in `.env` and `LLM_PROVIDER` matches the key you provided.

@@ -104,7 +104,7 @@
 
   let _isAdmin   = false;
   let _chatCount = 0;         // messages sent this session (non-admin only)
-  const CHAT_LIMIT = 3;
+  const CHAT_LIMIT = 2;
 
   function setAdmin(v) {
     _isAdmin = !!v;

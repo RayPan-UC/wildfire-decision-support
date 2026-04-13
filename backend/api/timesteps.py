@@ -25,6 +25,10 @@ timesteps_bp = Blueprint("timesteps", __name__)
 
 _DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 
+# Chat quota: {username: count}  — resets on server restart
+_CHAT_LIMIT   = 2
+_chat_counts: dict[str, int] = {}
+
 
 # ── Shared path helpers ───────────────────────────────────────────────────────
 
@@ -375,6 +379,15 @@ def chat(event_id: int):
 
     if not message:
         return jsonify({"error": "message required"}), 400
+
+    user    = request.current_user or {}
+    username = user.get("username", "anonymous")
+    is_admin = user.get("is_admin", False)
+    if not is_admin:
+        count = _chat_counts.get(username, 0)
+        if count >= _CHAT_LIMIT:
+            return jsonify({"error": f"Chat limit reached ({_CHAT_LIMIT} questions per session)."}), 429
+        _chat_counts[username] = count + 1
 
     summary      = ""
     road_summary = []

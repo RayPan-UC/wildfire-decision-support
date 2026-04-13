@@ -157,7 +157,7 @@
     inputRow.style.display = limited ? 'none' : '';
     if (lockMsg) {
       lockMsg.style.display = limited ? '' : 'none';
-      if (limited) lockMsg.textContent = '已達本次對話上限（' + CHAT_LIMIT + ' 則）。';
+      if (limited) lockMsg.textContent = 'Chat limit reached (' + CHAT_LIMIT + ' questions per session).';
     }
   }
 

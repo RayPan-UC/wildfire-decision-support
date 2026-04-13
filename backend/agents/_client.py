@@ -61,6 +61,8 @@ def _gemini_call(system: str, user_msg: str) -> str:
     }
     res = requests.post(url, params={"key": os.environ["GEMINI_API_KEY"]}, json=body, timeout=120)
     if not res.ok:
+        import logging
+        logging.getLogger(__name__).error("Gemini error %s: %s", res.status_code, res.text[:500])
         raise RuntimeError(f"Gemini API error: HTTP {res.status_code}")
     return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
 

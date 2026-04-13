@@ -189,10 +189,22 @@
     }).catch(function(){});
 
     if (_isAdmin) {
-      // Admin: also push virtual time to server every 10s as clock advances
+      // Admin: push virtual time to server every 10s as clock advances
       if (_syncPushInterval) clearInterval(_syncPushInterval);
       _syncPushInterval = setInterval(function() {
         if (currentEvent) window.API.setReplayTime(currentEvent.id, _replayVirtualTime).catch(function(){});
+      }, 10000);
+    } else {
+      // Non-admin: pull server time every 10s to stay in sync with admin
+      if (_syncPushInterval) clearInterval(_syncPushInterval);
+      _syncPushInterval = setInterval(function() {
+        if (!currentEvent) return;
+        window.API.getReplayTime(currentEvent.id).then(function(d) {
+          if (d.ms && d.ms !== _replayVirtualTime) {
+            _replayVirtualTime = d.ms;
+            _devApplyReplayTime();
+          }
+        }).catch(function(){});
       }, 10000);
     }
   }

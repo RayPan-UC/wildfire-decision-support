@@ -49,7 +49,11 @@ def create_app():
     app.register_blueprint(crowd_bp,     url_prefix='/api/events')
 
     # ── Frontend routes ───────────────────────────────────────────────────────
-    from flask import send_from_directory
+    from flask import send_from_directory, redirect
+
+    @app.route('/')
+    def index():
+        return redirect('/demo')
 
     @app.route('/demo')
     @app.route('/demo/')

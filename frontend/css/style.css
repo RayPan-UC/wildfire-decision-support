@@ -733,14 +733,15 @@ body.light #prediction-status-bar { background: rgba(255,255,255,.93); }
   border-radius: var(--radius); width: 340px; padding: 22px;
   box-shadow: var(--shadow);
 }
-.auth-modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; font-size: 16px; font-weight: 700; }
-#auth-modal-close { background: none; border: none; cursor: pointer; color: var(--text2); font-size: 18px; }
-#auth-form { display: flex; flex-direction: column; gap: 9px; }
-#auth-form input { padding: 8px 11px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface2); color: var(--text); font-size: 13px; outline: none; }
-#auth-form input:focus { border-color: var(--accent); }
-#auth-submit-btn { padding: 8px; border-radius: var(--radius); border: none; background: var(--accent); color: #fff; cursor: pointer; font-size: 13px; font-weight: 600; }
-#auth-toggle-mode { background: none; border: none; cursor: pointer; color: var(--accent); font-size: 11px; }
-#auth-error { color: var(--danger); font-size: 11px; min-height: 14px; }
+.auth-modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-size: 16px; font-weight: 700; }
+#auth-blurb { color: var(--text2); font-size: 12px; line-height: 1.5; margin-bottom: 14px; }
+.github-btn {
+  width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px;
+  padding: 10px; border-radius: var(--radius); border: 1px solid var(--border);
+  background: #24292f; color: #fff; cursor: pointer; font-size: 13px; font-weight: 600;
+}
+.github-btn:hover { background: #1c2026; }
+#auth-error { color: var(--danger); font-size: 11px; min-height: 14px; margin-top: 10px; }
 
 /* ── TOAST ──────────────────────────────────────────────────────────────────── */
 .toast {

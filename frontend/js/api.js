@@ -24,18 +24,15 @@
   window.API = {
     BASE: API_BASE,
 
-    async login(username, password) {
-      const data = await apiFetch('/api/auth/login', {
-        method: 'POST', body: JSON.stringify({ username, password }),
-      });
-      if (data.token) localStorage.setItem('wf_token', data.token);
-      return data;
-    },
+    githubLoginUrl() { return API_BASE + '/api/auth/github/login'; },
 
-    async register(username, password) {
-      return apiFetch('/api/auth/register', {
-        method: 'POST', body: JSON.stringify({ username, password }),
-      });
+    captureTokenFromHash() {
+      const m = window.location.hash.match(/[#&]token=([^&]+)/);
+      if (!m) return null;
+      const token = decodeURIComponent(m[1]);
+      localStorage.setItem('wf_token', token);
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+      return token;
     },
 
     async verifyToken() { return apiFetch('/api/auth/verify'); },

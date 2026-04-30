@@ -56,24 +56,13 @@ def seed_db():
 
     Also patches any existing events that are missing end_date (treated as
     realtime otherwise, which crashes the pipeline). Safe to call on every startup.
-    """
-    from db.models import FireEvent, User
-    import bcrypt
-    from geoalchemy2 import WKTElement
 
-    # Ensure admin account exists and has is_admin=True
-    # Password read from ADMIN_PASSWORD env var (falls back to 'admin' for local dev only)
-    admin_password = os.getenv('ADMIN_PASSWORD', 'admin').encode('utf-8')
-    admin = User.query.filter_by(username='admin').first()
-    if not admin:
-        hashed = bcrypt.hashpw(admin_password, bcrypt.gensalt()).decode('utf-8')
-        db.session.add(User(username='admin', password=hashed, is_admin=True))
-        db.session.commit()
-        print("[db] seeded admin account")
-    elif not admin.is_admin:
-        admin.is_admin = True
-        db.session.commit()
-        print("[db] patched admin account: set is_admin=True")
+    Note: User accounts are no longer seeded — they are created on-the-fly via
+    GitHub OAuth callback. Admin status is derived at runtime from
+    `github_login == ADMIN_GITHUB_LOGIN`.
+    """
+    from db.models import FireEvent
+    from geoalchemy2 import WKTElement
 
     _SEED_NAME = 'Fort McMurray Wildfire 2016'
     _SEED_END  = '2016-05-10'

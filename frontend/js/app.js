@@ -739,82 +739,46 @@
     });
   }
 
-  // ── Auth ──────────────────────────────────────────────────────────────────────
-
-  var authIsLogin = true;
+  // ── Auth (GitHub OAuth — login wall) ──────────────────────────────────────────
 
   function initAuth() {
-    document.getElementById('auth-login-btn')?.addEventListener('click', function() { showAuthModal(true); });
+    // 1) If we just came back from GitHub callback, the token is in the URL hash.
+    window.API.captureTokenFromHash();
+
     document.getElementById('auth-logout-btn')?.addEventListener('click', function() {
-      window.API.logout(); updateAuthUI(null); showAuthModal(false);
+      window.API.logout();
+      updateAuthUI(null);
+      showAuthModal();
     });
-    document.getElementById('auth-form')?.addEventListener('submit', handleAuth);
-    document.getElementById('auth-modal-close')?.addEventListener('click', closeAuthModal);
-    document.getElementById('auth-toggle-mode')?.addEventListener('click', function() {
-      authIsLogin = !authIsLogin;
-      document.getElementById('auth-modal-title').textContent  = authIsLogin ? 'Sign In' : 'Register';
-      document.getElementById('auth-submit-btn').textContent    = authIsLogin ? 'Login'   : 'Register';
-      document.getElementById('auth-toggle-mode').textContent   = authIsLogin
-        ? "Don't have an account? Register" : 'Already have an account? Login';
-      document.getElementById('auth-error').textContent = '';
+    document.getElementById('github-login-btn')?.addEventListener('click', function() {
+      window.location.href = window.API.githubLoginUrl();
     });
+
     const token = localStorage.getItem('wf_token');
     if (token) {
       window.API.verifyToken()
-        .then(function(d) { updateAuthUI(d.username, d.is_admin); })
-        .catch(function() { updateAuthUI(null); showAuthModal(false); });
+        .then(function(d) { updateAuthUI(d.github_login, d.is_admin, d.avatar_url); hideAuthModal(); })
+        .catch(function() { updateAuthUI(null); showAuthModal(); });
     } else {
-      showAuthModal(false);
+      showAuthModal();
     }
   }
 
-  // dismissable=true: user clicked Sign In (can close); false: forced on startup (no close btn)
-  function showAuthModal(dismissable) {
-    const closeBtn = document.getElementById('auth-modal-close');
-    if (closeBtn) closeBtn.style.display = dismissable ? '' : 'none';
-    document.getElementById('auth-modal-overlay').classList.add('visible');
-  }
-  function closeAuthModal() { document.getElementById('auth-modal-overlay').classList.remove('visible'); }
+  // The auth modal is non-dismissible — site is gated behind GitHub login.
+  function showAuthModal() { document.getElementById('auth-modal-overlay').classList.add('visible'); }
+  function hideAuthModal() { document.getElementById('auth-modal-overlay').classList.remove('visible'); }
 
-  async function handleAuth(e) {
-    e.preventDefault();
-    const username = document.getElementById('auth-username').value.trim();
-    const password = document.getElementById('auth-password').value;
-    const errEl    = document.getElementById('auth-error');
-    errEl.textContent = '';
-    try {
-      if (authIsLogin) {
-        const d = await window.API.login(username, password);
-        updateAuthUI(d.username, d.is_admin);
-      } else {
-        await window.API.register(username, password);
-        await window.API.login(username, password);
-        updateAuthUI(username);
-      }
-      closeAuthModal();
-      // Reload events with new token (firms hotspots also need auth)
-      allEvents = await loadEvents();
-      // If an event was already open, reload its timesteps now that we have a token
-      if (currentEvent) await loadTimesteps(currentEvent.id);
-    } catch(err) {
-      errEl.textContent = err.message;
-    }
-  }
-
-  function updateAuthUI(username, isAdmin) {
-    const loginBtn  = document.getElementById('auth-login-btn');
+  function updateAuthUI(login, isAdmin, avatarUrl) {
     const logoutBtn = document.getElementById('auth-logout-btn');
     const userLabel = document.getElementById('auth-user-label');
     const devBtn    = document.getElementById('dev-toggle-btn');
-    if (username) {
+    if (login) {
       _isAdmin = !!isAdmin;
-      loginBtn?.classList.add('hidden');
       logoutBtn?.classList.remove('hidden');
-      if (userLabel) userLabel.textContent = username;
+      if (userLabel) userLabel.textContent = login + (isAdmin ? ' (admin)' : '');
       if (devBtn) devBtn.style.display = _isAdmin ? '' : 'none';
     } else {
       _isAdmin = false;
-      loginBtn?.classList.remove('hidden');
       logoutBtn?.classList.add('hidden');
       if (userLabel) userLabel.textContent = '';
       if (devBtn) devBtn.style.display = 'none';

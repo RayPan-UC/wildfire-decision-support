@@ -233,8 +233,9 @@ def _save_ai_report(ai_dir: Path, risk: dict, impact: dict, evacuation: dict,
 @timesteps_bp.route("/events/<int:event_id>/timesteps/<int:ts_id>/report", methods=["POST"])
 @token_required
 def generate_report(event_id: int, ts_id: int):
-    """Return cached AI report for everyone; generate it only for admins.
-    Body: { force: true } bypasses cache (admin only)."""
+    """Return cached AI report; any authed user may trigger first generation.
+    Body: { force: true } bypasses cache (admin only — non-admins cannot
+    regenerate, only kick off the initial run on a cache miss)."""
     is_admin = (request.current_user or {}).get('is_admin', False)
 
     result, err = _get_event_and_ts(event_id, ts_id)
@@ -243,16 +244,15 @@ def generate_report(event_id: int, ts_id: int):
     event, ts = result
 
     force = bool((request.get_json(silent=True) or {}).get("force", False))
+    if force and not is_admin:
+        return jsonify({"error": "Only admins can regenerate cached reports."}), 403
+
     ai_dir = _ai_report_dir(event.id, event.year, ts.slot_time)
 
     if not force:
         cached = _load_ai_report(ai_dir)
         if cached:
             return jsonify(cached), 200
-
-    # Cache miss (or force) — non-admins cannot trigger generation
-    if not is_admin:
-        return jsonify({"cached": False, "error": "Report not yet generated."}), 403
 
     fire_context = _read_json(_pred_dir(event.id, event.year, ts.slot_time) / "fire_context.json")
     if not fire_context:

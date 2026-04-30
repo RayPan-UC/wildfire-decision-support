@@ -18,6 +18,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from datetime import date
+
 from flask import Blueprint, Response, current_app, jsonify, request, stream_with_context
 from utils.auth_middleware import token_required, admin_required
 
@@ -25,9 +27,9 @@ timesteps_bp = Blueprint("timesteps", __name__)
 
 _DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 
-# Chat quota: {username: count}  — resets on server restart
-_CHAT_LIMIT   = 2
-_chat_counts: dict[str, int] = {}
+# Chat quota: 5 messages per GitHub user per UTC day. Counts persist in the
+# users table so quota survives restarts and is per-user (not per-session).
+_CHAT_LIMIT = 5
 
 
 # ── Shared path helpers ───────────────────────────────────────────────────────
@@ -380,14 +382,23 @@ def chat(event_id: int):
     if not message:
         return jsonify({"error": "message required"}), 400
 
-    user    = request.current_user or {}
-    username = user.get("username", "anonymous")
-    is_admin = user.get("is_admin", False)
-    if not is_admin:
-        count = _chat_counts.get(username, 0)
-        if count >= _CHAT_LIMIT:
-            return jsonify({"error": f"Chat limit reached ({_CHAT_LIMIT} questions per session)."}), 429
-        _chat_counts[username] = count + 1
+    payload  = request.current_user or {}
+    user_id  = payload.get("user_id")
+    is_admin = payload.get("is_admin", False)
+    if not is_admin and user_id is not None:
+        from db.connection import db
+        from db.models import User
+        u = User.query.get(user_id)
+        if u is None:
+            return jsonify({"error": "User not found."}), 401
+        today = date.today()
+        if u.chat_count_date != today:
+            u.chat_count_date = today
+            u.chat_count      = 0
+        if u.chat_count >= _CHAT_LIMIT:
+            return jsonify({"error": f"Daily chat limit reached ({_CHAT_LIMIT} per day). Try again tomorrow."}), 429
+        u.chat_count += 1
+        db.session.commit()
 
     summary      = ""
     road_summary = []

@@ -6,6 +6,8 @@ An AI-powered wildfire situational awareness platform built for emergency manage
 
 **Live demo:** https://wildfire-ai.com/demo
 
+> ⚠️ The live demo is temporarily down for security hardening and infrastructure migration. Will be restored shortly.
+
 ---
 
 ## Screenshots

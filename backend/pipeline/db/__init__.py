@@ -22,9 +22,9 @@ def setup_db(app) -> None:
     ensure_db()
     with app.app_context():
         _migrate_event_timesteps(db)
+        _migrate_users(db)        # must run before create_all (drops legacy table)
         db.create_all()
         _migrate_field_reports(db)
-        _migrate_users(db)
         _migrate_fire_events(db)
         seed_db()
 
@@ -60,17 +60,23 @@ def _migrate_field_reports(db) -> None:
 
 
 def _migrate_users(db) -> None:
-    """Add is_admin column to users table if missing."""
+    """Drop legacy users table if it has the old password-auth schema.
+
+    The new schema uses GitHub OAuth (no password column). On a fresh deploy
+    `db.create_all()` builds the new table; on an old deploy we drop the legacy
+    one so it can be recreated with the new columns.
+    """
     from sqlalchemy import inspect, text
 
     inspector = inspect(db.engine)
     if "users" not in inspector.get_table_names():
         return
     existing = {col["name"] for col in inspector.get_columns("users")}
-    if "is_admin" not in existing:
-        print("[db] users: adding column is_admin")
+    legacy = {"username", "password"}
+    if legacy & existing:
+        print("[db] users: legacy auth schema detected — dropping table")
         with db.engine.connect() as conn:
-            conn.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT FALSE"))
+            conn.execute(text("DROP TABLE users CASCADE"))
             conn.commit()
 
 

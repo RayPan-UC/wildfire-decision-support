@@ -62,7 +62,10 @@ def github_login():
         return jsonify({'message': 'GitHub OAuth not configured.'}), 500
     state = secrets.token_urlsafe(24)
     _oauth_states.add(state)
-    redirect_uri = request.args.get('redirect_uri') or f"{request.host_url.rstrip('/')}/api/auth/github/callback"
+    # Build callback from FRONTEND_URL so the scheme/host match GitHub's OAuth
+    # App registration even when Flask sits behind a TLS-terminating proxy
+    # (Cloudflare/Caddy) that strips https → http on the way to the origin.
+    redirect_uri = f"{FRONTEND_URL.rstrip('/')}/api/auth/github/callback"
     params = {
         'client_id':    GH_CLIENT_ID,
         'redirect_uri': redirect_uri,

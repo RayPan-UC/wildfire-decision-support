@@ -249,9 +249,7 @@
     if (!body) return;
     if (_cardState === 'idle') {
       body.className = 'ai-card-body idle';
-      body.innerHTML = _isAdmin
-        ? '<div class="ai-card-prompt">Generate AI report</div>'
-        : '<div class="ai-card-prompt ai-card-locked">Report not yet generated</div>';
+      body.innerHTML = '<div class="ai-card-prompt">Generate AI report</div>';
     } else if (_cardState === 'loading') {
       body.className = 'ai-card-body loading';
       body.innerHTML = '<div class="spinner-sm"></div><div class="ai-card-status">Generating…</div>';
@@ -268,8 +266,7 @@
 
   function _onCardClick() {
     if (_cardState === 'idle') {
-      if (_isAdmin) _startGenerate();
-      // non-admin: card shows "not yet generated" — clicking does nothing
+      _startGenerate();
     } else if (_cardState === 'done') {
       open();
     }
